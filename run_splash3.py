@@ -8,14 +8,14 @@ from multiprocessing.pool import Pool
 
 
 def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB", l1i_size="16kB", mem_size="1GB"):
-    gem5_home = "/gem5"  # Modify here to change the directory path of gem5
-    splash3_dir = f"{gem5_home}/splash-3-static-link/codes"
+    gem5_home = "/gem5/pecc"
+    splash3_dir = "/gem5/pecc/splash-3-static-link/codes"
     config = f"{program}_{protocol}_{ncore}_{llc_size}"
     binary = ""
     stdin = ""
     options = ""
     wkdir = ""
-    outdir = f"{gem5_home}/splash-3-out/{config}"
+    outdir = f"/gem5/pecc/splash-3-out/{config}"
 
     if program == 'barnes':
         binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
@@ -110,12 +110,8 @@ if __name__ == '__main__':
             mem_size = '1GB'
 
         for protocol in ['INCL', 'EXCL']:
-            for core_count in [2, 4]:
+            for core_count in [4]:
                 for llc_size in ['1024kB']:
-                    cmds.append(generate_splash3_command(program, protocol, core_count, llc_size, mem_size=mem_size))
-
-            for core_count in [8]:
-                for llc_size in ['256kB', '512kB', '1024kB']:
                     cmds.append(generate_splash3_command(program, protocol, core_count, llc_size, mem_size=mem_size))
 
     pool = Pool(31)  # Modify here to configure the number of cores to run the simulation
