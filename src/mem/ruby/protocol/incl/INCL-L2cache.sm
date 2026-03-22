@@ -35,7 +35,24 @@ machine(MachineType:L2Cache, "LLC") :
     ////////////////////////////////////////////////////////////////////////////
 
     state_declaration(State, desc="State", default="L2Cache_State_InMem") {
-        // Todo: States
+        // stable states
+        InMem, AccessPermission:Invalid, desc="Cache line data is in memory, not in caching hierarchy";
+        LOC, AccessPermission:Read_Write, desc="LLC-only clean";
+        LOD, AccessPermission:Read_Write, desc="LLC-only dirty";
+
+        S, AccessPermission:Read_Only, desc="S";
+        M, AccessPermission:Maybe_Stale, desc="M";
+        S_NI, AccessPermission:Maybe_Stale, desc="Non-Inclusive S";
+        M_NI, AccessPermission:Maybe_Stale, desc="Non-Inclusive M";
+
+        // transient state for memory read/write pending
+        I_to_S_await_mem_data, AccessPermission:Busy, desc="";
+        I_to_M_await_mem_data, AccessPermission:Busy, desc="";
+        LOD_to_LOC_await_ack_await_allocation, AccessPermission:Busy, desc="";
+
+        I_to_S_await_mem_data_NI, AccessPermission:Busy, desc="";
+        I_to_M_await_mem_data_NI, AccessPermission:Busy, desc="";
+        DirtyNI_to_I_await_ack, AccessPermission:Busy, desc="";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -43,7 +60,38 @@ machine(MachineType:L2Cache, "LLC") :
     ////////////////////////////////////////////////////////////////////////////
 
     enumeration(Event, desc="Cache events") {
-        // Todo: Events
+        DontCare_Request, desc="";
+
+        GetS, desc="";
+        GetM, desc="";
+
+        GetS_NI, desc="";
+        GetM_NI, desc="";
+
+        PutS_NotLastCopy, desc="";
+        PutS_LastCopy_Clean, desc="";
+        PutS_LastCopy_Dirty, desc="";
+        PutM, desc="";
+        PutLOD, desc="";
+        Put_InvalidReq, dest="";
+
+        PutS_NotLastCopy_NI_BypassLLC, desc="";
+        PutS_NotLastCopy_NI_InsertToLLC, desc="";
+        PutS_LastCopy_Clean_NI_BypassLLC, desc="";
+        PutS_LastCopy_Clean_NI_InsertToLLC, desc="";
+        PutS_LastCopy_Dirty_NI_BypassLLC, desc="";
+        PutS_LastCopy_Dirty_NI_InsertToLLC, desc="";
+        PutM_NI_BypassLLC, desc="";
+        PutM_NI_InsertToLLC, desc="";
+
+        // Events triggered by receiving L1 responses
+        Replacement, desc="...";
+
+        // Events triggered by receiving memory responses
+        Mem_Response, desc="...";
+        Mem_Ack, desc="...";
+        Sync, desc="";
+        Upg, desc="...";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -53,9 +101,9 @@ machine(MachineType:L2Cache, "LLC") :
     // Directory entry
     structure(Entry, desc="Directory entry", interface="AbstractCacheEntry", main="false") {
         State state, desc="State";
-        // transaction buffer fields
         Cycles reqID, desc="Req ID";
         MachineID requestor, desc="requestor";
+        Addr from_addr, desc="Address of request that triggers replacement";
         bool writeback_triggered, desc="Indicator of chained eviction";
         Cycles memReadIssueTime, desc="Performance metric monitor field";
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
@@ -122,19 +170,42 @@ machine(MachineType:L2Cache, "LLC") :
         return dir_entry;
     }
 
-    void deallocateCacheBlock(Addr address) {
-        if (cacheMemory.isTagPresent(address)) {
-            cacheMemory.deallocate(address);
+    // Interface functions required by SLICC
+    State getState(TBE tbe, CacheEntry cache_entry, Addr addr) {
+        if(is_valid(getDirectoryEntry(addr))) {
+            return getDirectoryEntry(addr).state;
+        } else if (cacheMemory.containNILine(addr)) {
+            assert(false);
+            int state_idx := cacheMemory.getNIState(addr);
+            if (state_idx == 1) {
+                return State:S_NI;
+            } else if (state_idx == 2) { 
+                return State:M_NI;
+            } else if (state_idx == 3) {
+                return State:I_to_S_await_mem_data_NI;
+            } else if (state_idx == 4) {
+                return State:I_to_M_await_mem_data_NI; 
+            } else if (state_idx == 5) {
+                return State:DirtyNI_to_I_await_ack;
+            }
         }
     }
 
-    // Interface functions required by SLICC
-    State getState(TBE tbe, CacheEntry cache_entry, Addr addr) {
-        return getDirectoryEntry(addr).state;
-    }
-
     void setState(TBE tbe, CacheEntry cache_entry, Addr addr, State state) {
-        getDirectoryEntry(addr).state := state;
+        if(is_valid(getDirectoryEntry(addr))) {
+            getDirectoryEntry(addr).state := state;
+        } else if (cacheMemory.containNILine(addr)) {
+            assert(false);
+            if (state == State:I_to_S_await_mem_data_NI) {
+                cacheMemory.setNITransientState(addr, 3);
+            } else if (state == State:I_to_M_await_mem_data_NI) {
+                cacheMemory.setNITransientState(addr, 4);
+            } else if (state == State:DirtyNI_to_I_await_ack) {
+                cacheMemory.setNITransientState(addr, 5);
+            } else {
+                cacheMemory.setNITransientState(addr, 0);
+            }
+        }
     }
 
     AccessPermission getAccessPermission(Addr addr) {
@@ -217,10 +288,10 @@ machine(MachineType:L2Cache, "LLC") :
                 TBE tbe := TBEs[in_msg.addr];
 
                 if (in_msg.Type == MemoryRequestType:MEMORY_READ) {
-                    assert(is_valid(cache_entry));
+                    DPRINTF(FlexLLC, "Mem_Response: Address = %#x, Current State = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr));
                     trigger(Event:Mem_Response, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.Type == MemoryRequestType:MEMORY_WB) {
-                    assert(is_valid(cache_entry));
+                    DPRINTF(FlexLLC, "Mem_Ack: Address = %#x, Current State = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr));
                     trigger(Event:Mem_Ack, in_msg.addr, cache_entry, tbe);
                 } else {
                     error("Invalid memory response message");
@@ -245,10 +316,117 @@ machine(MachineType:L2Cache, "LLC") :
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
 
+                // todo: add replacement logic
+
                 if (in_msg.type == CoherenceRequestType:GetS) {
-                    // Todo
-                } else if () {
-                    // Todo
+                    if (cacheMemory.containLLCLine(in_msg.addr)) {
+                        DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
+                    } else if (cacheMemory.containNILine(in_msg.addr)) {
+                        DPRINTF(FlexLLC, "GetS_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:GetS_NI, in_msg.addr, cache_entry, tbe);
+                    } else {
+                        if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
+                            DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
+                        } else {
+                            DPRINTF(FlexLLC, "GetS_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:GetS_NI, in_msg.addr, cache_entry, tbe);
+                        }
+                    }
+                } else if (in_msg.type == CoherenceRequestType:GetM) {
+                    if (cacheMemory.containLLCLine(in_msg.addr)) {
+                        DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
+                    } else if (cacheMemory.containNILine(in_msg.addr)) {
+                        DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
+                    } else {
+                        if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
+                            DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
+                        } else {
+                            DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
+                        }
+                    }
+                } else if (in_msg.type == CoherenceRequestType:Put) {
+                    if (cacheMemory.getOwner(in_msg.addr).count() == 1) {
+                        // PutM
+                        if (cacheMemory.containLLCLine(in_msg.addr)) {
+                            // IN
+                            assert(getState(tbe, cache_entry, in_msg.addr) == State:M);
+                            DPRINTF(FlexLLC, "PutM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:PutM, in_msg.addr, cache_entry, tbe);
+                        } else if (cacheMemory.containNILine(in_msg.addr)) {
+                            // NI
+                            assert(getState(tbe, cache_entry, in_msg.addr) == State:M_NI);
+                            DPRINTF(FlexLLC, "PutM_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:PutM_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
+                        } else {
+                            assert(false);
+                        }
+                    } else if (cacheMemory.getSharers(in_msg.addr).count() > 0) {
+                        // PutS
+                        if (cacheMemory.containLLCLine(in_msg.addr)) {
+                            // IN
+                            assert(getState(tbe, cache_entry, in_msg.addr) == State:S);
+                            if (cacheMemory.getIsDirty(in_msg.addr)) {
+                                if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
+                                    DPRINTF(FlexLLC, "PutS_NotLastCopy: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_NotLastCopy, in_msg.addr, cache_entry, tbe);
+                                } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
+                                    DPRINTF(FlexLLC, "PutS_LastCopy_Dirty: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_LastCopy_Dirty, in_msg.addr, cache_entry, tbe);
+                                } else {
+                                    assert(false);
+                                }
+                            } else {
+                                if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
+                                    DPRINTF(FlexLLC, "PutS_NotLastCopy: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_NotLastCopy, in_msg.addr, cache_entry, tbe);
+                                } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
+                                    DPRINTF(FlexLLC, "PutS_LastCopy_Clean: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_LastCopy_Clean, in_msg.addr, cache_entry, tbe);
+                                } else {
+                                    assert(false);
+                                }
+                            }
+                        } else if (cacheMemory.containNILine(in_msg.addr)) {
+                            // NI
+                            assert(getState(tbe, cache_entry, in_msg.addr) == State:S_NI);
+                            if (cacheMemory.getIsDirty(in_msg.addr)) {
+                                if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
+                                    DPRINTF(FlexLLC, "PutS_NotLastCopy_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_NotLastCopy_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
+                                } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
+                                    DPRINTF(FlexLLC, "PutS_LastCopy_Dirty_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_LastCopy_Dirty_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
+                                } else {
+                                    assert(false);
+                                }
+                            } else {
+                                if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
+                                    DPRINTF(FlexLLC, "PutS_NotLastCopy_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_NotLastCopy_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
+                                } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
+                                    DPRINTF(FlexLLC, "PutS_LastCopy_Clean_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                    trigger(Event:PutS_LastCopy_Clean_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
+                                } else {
+                                    assert(false);
+                                }
+                            }
+                        } else {
+                            assert(false);
+                        }
+                    } else {
+                        assert(false);
+                    }
+                } else if (in_msg.type == CoherenceRequestType:Upg) {
+                    DPRINTF(FlexLLC, "Upg: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                    trigger(Event:Upg, in_msg.addr, cache_entry, tbe);
+                } else {
+                    trigger(Event:DontCare_Request, in_msg.addr, cache_entry, tbe);
                 }
             }
         }
@@ -260,12 +438,548 @@ machine(MachineType:L2Cache, "LLC") :
 
     // actions on cache_entry and tbe
 
-    // Todo
+    action(allocateCacheBlock, desc="Allocate a cache block") {
+        assert(is_invalid(cache_entry));
+        assert(cacheMemory.cacheAvail(address));
+        set_cache_entry(cacheMemory.XYZAllocate(address, new CacheEntry));
+    }
+
+    action(deallocateCacheBlock, desc="Deallocate a cache block") {
+        assert(is_valid(cache_entry));
+        cacheMemory.XYZDeallocate(address);
+        unset_cache_entry();
+    }
+
+    action(writeDataToCache, desc="Write data to cache") {
+        peek(requestInPort, RequestMsg) {
+            assert(is_valid(cache_entry));
+            cache_entry.dataBlk := in_msg.dataBlk;
+            cache_entry.dirty := in_msg.dirty;
+            cacheMemory.setMRU(cache_entry);
+        }
+    }
+
+    action(writeMemResponseToCache, desc="Write data of memory response to cache") {
+        peek(responseFromDirInPort, DirectoryMsg) {
+            assert(is_valid(cache_entry));
+            cache_entry.dataBlk := in_msg.DataBlk;
+            cache_entry.dirty := false;
+            cacheMemory.setMRU(cache_entry);
+        }
+    }
+
+    // actions on out_port
+    
+    action(sendMemRead, desc="Send memory read request") {
+        peek(requestInPort, RequestMsg) {
+            Entry dir_entry := getDirectoryEntry(address);
+            dir_entry.requestor := in_msg.requestor;
+            dir_entry.reqID := in_msg.reqID;
+            dir_entry.memReadIssueTime := curCycle();
+
+            enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
+                out_msg.addr := in_msg.addr;
+                out_msg.Type := MemoryRequestType:MEMORY_READ;
+                out_msg.Sender := in_msg.requestor;
+                out_msg.MessageSize := MessageSizeType:Request_Control;
+                out_msg.Len := 0;
+                out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
+            }
+
+            DPRINTF(FlexLLC, "sendMemRead: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
+        }
+    }
+
+    action(writebackFromL2, desc="Writeback data") {
+        peek(requestInPort, RequestMsg) {
+            assert(is_valid(cache_entry));
+            assert(in_msg.type == CoherenceRequestType:Put);
+            Entry dir_entry := getDirectoryEntry(address);
+            dir_entry.memWriteIssueTime := curCycle();
+            dir_entry.from_addr := in_msg.addr;
+            dir_entry.reqID := in_msg.reqID;
+            dir_entry.requestor := in_msg.requestor;
+            Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
+            from_dir_entry.writeback_triggered := true;
+
+            enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
+                out_msg.addr := address;
+                out_msg.Type := MemoryRequestType:MEMORY_WB;
+                out_msg.Sender := machineID;
+                out_msg.MessageSize := MessageSizeType:Writeback_Data;
+                out_msg.DataBlk := cache_entry.dataBlk;
+                out_msg.Len := 0;
+                out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
+            }
+
+            DPRINTF(FlexLLC, "writebackFromL2: Address = %#x, Current State = %s, Sender = %s \n", address, getDirectoryEntry(address).state, machineID);
+        }
+    }
+
+    action(writebackFromL1, desc="Writeback data") {
+        peek(requestInPort, RequestMsg) {
+            assert(in_msg.type == CoherenceRequestType:Put);
+            Entry dir_entry := getDirectoryEntry(address);
+            dir_entry.memWriteIssueTime := curCycle();
+            dir_entry.from_addr := in_msg.addr;
+            dir_entry.reqID := in_msg.reqID;
+            dir_entry.requestor := in_msg.requestor;
+            Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
+            from_dir_entry.writeback_triggered := true;
+
+            enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
+                out_msg.addr := address;
+                out_msg.Type := MemoryRequestType:MEMORY_WB;
+                out_msg.Sender := in_msg.requestor;
+                out_msg.MessageSize := MessageSizeType:Writeback_Data;
+                out_msg.DataBlk := in_msg.dataBlk;
+                out_msg.Len := 0;
+                out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
+            }
+
+            DPRINTF(FlexLLC, "writebackFromL1: Address = %#x, Current State = %s, Sender = %s \n", address, getDirectoryEntry(address).state, in_msg.requestor);
+        }
+    }
+
+    action(sendAck, desc="Send Put acknowledgement") {
+        peek(requestInPort, RequestMsg) {
+            assert(is_valid(cache_entry));
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := in_msg.reqID;
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:Ack;
+                out_msg.sender := machineID;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(in_msg.requestor);
+                out_msg.MessageSize := MessageSizeType:Writeback_Control;
+            }
+
+            DPRINTF(FlexLLC, "sendAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
+        }
+    }
+
+    action(sendData, desc="Send data") {
+        peek(requestInPort, RequestMsg) {
+            assert(is_valid(cache_entry));
+            cacheMemory.setMRU(cache_entry);
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := in_msg.reqID;
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:FromLLC;
+                out_msg.sender := machineID;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(in_msg.requestor);
+                out_msg.dataBlk := cache_entry.dataBlk;
+                out_msg.dirty := cache_entry.dirty;
+                out_msg.MessageSize := MessageSizeType:Response_Data;
+            }
+
+            DPRINTF(FlexLLC, "sendData: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
+        }
+    }
+
+    action(forwardAck, desc="Send Put acknowledgement") {
+        Entry dir_entry := getDirectoryEntry(address);
+        enqueue(responseOutPort, ResponseMsg, 1) {
+            out_msg.reqID := dir_entry.reqID;
+            out_msg.addr := dir_entry.from_addr;
+            out_msg.type := CoherenceResponseType:Ack;
+            out_msg.sender := machineID;
+            out_msg.Destination.clear();
+            out_msg.Destination.add(dir_entry.requestor);
+            out_msg.MessageSize := MessageSizeType:Writeback_Control;
+        }
+        DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, dir_entry.requestor);
+    }
+
+    action(sendDataFromCache, desc="Send data from cache entry") {
+        peek(requestInPort, RequestMsg) {
+            assert(is_valid(cache_entry));
+            assert(is_invalid(tbe));
+
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := in_msg.reqID;
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:FromLLC;
+                out_msg.sender := machineID;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(in_msg.requestor);
+                out_msg.dataBlk := cache_entry.dataBlk;
+                out_msg.dirty := cache_entry.dirty;
+                out_msg.MessageSize := MessageSizeType:Response_Data;
+            }
+            DPRINTF(FlexLLC, "sendDataFromCache: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
+        }
+    }
+
+    action(forwardMemResponse, desc="Forward memory data response") {
+        Entry dir_entry := getDirectoryEntry(address);
+        peek(responseFromDirInPort, DirectoryMsg) {
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := dir_entry.reqID;
+                out_msg.addr := in_msg.addr;
+                out_msg.type := CoherenceResponseType:FromMemory;
+                out_msg.sender := in_msg.Sender;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(dir_entry.requestor);
+                out_msg.dataBlk := in_msg.DataBlk;
+                out_msg.MessageSize := MessageSizeType:Response_Data;
+            }
+            DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, dir_entry.requestor);
+        }
+    }
+    
+    // actions on in_port
+
+    action(popMemResponseQueue, desc="Pop the memory response queue") {
+        responseFromDirInPort.dequeue(clockEdge());
+    }
+
+    action(popResponseQueue, desc="Pop the response queue") {
+        responseInPort.dequeue(clockEdge());
+    }
+
+    action(popRequestQueue, desc="Pop the request queue") {
+        requestInPort.dequeue(clockEdge());
+    }
+
+    action(wakeUpAllQueues, desc="...") {
+        wakeUpAllBuffers();
+    }
+    
+    // Other actions
+
+    action(decrementOutstandingMemRequest, desc="...") {
+        numOutstandingMemRequests := numOutstandingMemRequests - 1;
+        assert(numOutstandingMemRequests >= 0);
+    }
+
+    action(profileMemWriteLatency, desc="...") {
+        Entry dir_entry := getDirectoryEntry(address);
+        profiler.profileMemLatency(curCycle() - dir_entry.memWriteIssueTime);
+        profiler.profileMemoryWrite();
+    }
+
+    action(profileMemReadLatency, desc="...") {
+        Entry dir_entry := getDirectoryEntry(address);
+        profiler.profileMemLatency(curCycle() - dir_entry.memReadIssueTime);
+    }
+
+    // xyz actions
+
+    action(xyzAddSharer, desc="") {
+        peek(requestInPort, RequestMsg) {
+            cacheMemory.addSharer(in_msg.addr, in_msg.requestor, true);        
+        }
+    }
+
+    action(xyzRemoveSharer, desc="") {
+        peek(requestInPort, RequestMsg) {
+            cacheMemory.removeSharer(in_msg.addr, in_msg.requestor);
+        }
+    }
+
+    action(xyzClearSharers, desc="") {
+        peek(requestInPort, RequestMsg) {
+            cacheMemory.clearSharers(in_msg.addr);
+        }
+    }
+
+    action(xyzAddOwner, desc="") {
+        peek(requestInPort, RequestMsg) {
+            cacheMemory.addOwner(in_msg.addr, in_msg.requestor, true);
+        }
+    }
+
+    action(xyzClearOwner, desc="") {
+        peek(requestInPort, RequestMsg) {
+            cacheMemory.clearOwner(in_msg.addr);
+        }
+    }
+
+    action(xyzConvertOwnerToSharer, desc="") {
+        peek(requestInPort, RequestMsg) {
+            if (cacheMemory.containLLCLine(in_msg.addr)) {
+                cacheMemory.convertOwnerToSharer(in_msg.addr, true);
+            } else if (cacheMemory.containNILine(in_msg.addr)) {
+                cacheMemory.convertOwnerToSharer(in_msg.addr, false);
+            } else {
+                assert(false);
+            }
+        }
+    }
+
+    action(xyzSetIsDirty, desc="") {
+        cacheMemory.setIsDirty(address);
+    }
+
+    action(xyzUnsetIsDirty, desc="") {
+        cacheMemory.unSetIsDirty(address);
+    }
+
+    action(xyzConvertNILineToIN, desc="") {
+        cacheMemory.convertNILineToIN(address);
+    }
+
+    action(xyzAddSharerNI, desc="") {
+        peek(requestInPort, RequestMsg) {
+            cacheMemory.addSharer(in_msg.addr, in_msg.requestor, false);        
+        }
+    }
+
+    action(xyzAddOwnerNI, desc="") {
+        peek(requestInPort, RequestMsg) {
+            cacheMemory.addOwner(in_msg.addr, in_msg.requestor, false);
+        }
+    }
+    
+    action(xyzDeallocateMetadataNI, desc="") {
+        cacheMemory.removeLineFromNIDirectory(address);
+    }
 
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
 
-    // Todo
+    // transactions from InMem
+
+    transition(InMem, GetS, I_to_S_await_mem_data) {BankAccess, MemAccess} {
+        allocateCacheBlock;
+        sendMemRead;
+        xyzAddSharer;
+        popRequestQueue;
+    }
+
+    transition(InMem, GetM, I_to_M_await_mem_data) {BankAccess, MemAccess} {
+        allocateCacheBlock;
+        sendMemRead;
+        xyzAddOwner;
+        popRequestQueue;
+    }
+
+    transition(InMem, GetS_NI, I_to_S_await_mem_data_NI) {BankAccess, MemAccess} {
+        sendMemRead;
+        xyzAddSharerNI;
+        popRequestQueue;
+    }
+
+    transition(InMem, GetM_NI, I_to_M_await_mem_data_NI) {BankAccess, MemAccess} {
+        sendMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_S_await_mem_data, Mem_Response, S) {BankAccess} {
+        decrementOutstandingMemRequest;
+        writeMemResponseToCache;
+        forwardMemResponse;
+        profileMemReadLatency;
+        popMemResponseQueue;
+        wakeUpAllQueues;
+    }
+
+    transition(I_to_M_await_mem_data, Mem_Response, M) {BankAccess} {
+        decrementOutstandingMemRequest;
+        writeMemResponseToCache;
+        forwardMemResponse;
+        profileMemReadLatency;
+        popMemResponseQueue;
+        wakeUpAllQueues;
+    }
+
+    transition(I_to_S_await_mem_data_NI, Mem_Response, S_NI) {BankAccess} {
+        decrementOutstandingMemRequest;
+        forwardMemResponse;
+        profileMemReadLatency;
+        popMemResponseQueue;
+        wakeUpAllQueues;
+    }
+
+    transition(I_to_M_await_mem_data_NI, Mem_Response, M_NI) {BankAccess} {
+        decrementOutstandingMemRequest;
+        forwardMemResponse;
+        profileMemReadLatency;
+        popMemResponseQueue;
+        wakeUpAllQueues;
+    }
+
+    // transitions from LOC & LOD
+
+    transition(LOD, Sync, LOD_to_LOC_await_ack_await_allocation) {
+        xyzUnsetIsDirty;
+        writebackFromL2;
+    }
+
+    transition(LOD_to_LOC_await_ack_await_allocation, Mem_Ack, LOC) {
+        decrementOutstandingMemRequest;
+        popMemResponseQueue;
+        profileMemWriteLatency;
+    }
+
+    transition({LOC, LOD}, GetS, S) {BankAccess} {
+        xyzAddSharer;
+        sendData;
+        popRequestQueue;
+    }
+
+    transition({LOC, LOD}, GetM, M) {BankAccess} {
+        xyzAddOwner;
+        xyzSetIsDirty;
+        sendData;
+        popRequestQueue;
+    }
+
+    // transitions from S
+
+    transition(S, GetM, M) {
+        xyzClearSharers;
+        xyzAddOwner;
+        xyzSetIsDirty;
+        popRequestQueue;
+    }
+
+    transition(S, Upg, M) {
+        xyzClearSharers;
+        xyzAddOwner;
+        xyzSetIsDirty;
+        popRequestQueue;
+    }
+
+    transition(S, GetS) {
+        xyzAddSharer;
+        popRequestQueue;
+    }
+
+    transition(S, PutS_NotLastCopy) {
+        xyzRemoveSharer;
+        popRequestQueue;
+    }
+
+    transition(S, PutS_LastCopy_Clean, LOC) {
+        xyzClearSharers;
+        popRequestQueue;
+    }
+
+    transition(S, PutS_LastCopy_Dirty, LOD) {
+        xyzClearSharers;
+        popRequestQueue;
+    }
+
+    // transitions from M
+
+    transition(M, GetS) {
+        xyzClearOwner;
+        xyzAddOwner;
+        popRequestQueue;
+    }
+
+    transition(M, GetM) {
+        xyzClearOwner;
+        xyzAddOwner;
+        popRequestQueue;
+    }
+
+    transition(M, PutM, LOD) {BankAccess} {
+        xyzClearOwner;
+        writeDataToCache;
+        sendAck;
+        popRequestQueue;
+    }
+
+    // transitions from S_NI
+
+    transition(S_NI, GetS_NI) {
+        xyzAddSharerNI;
+        popRequestQueue;
+    }
+
+    transition(S_NI, Upg, M_NI) {
+        xyzClearSharers;
+        xyzAddOwnerNI;
+        popRequestQueue;
+    }
+
+    transition(S_NI, GetM_NI, M_NI) {
+        xyzClearSharers;
+        xyzAddOwnerNI;
+        popRequestQueue;
+    }
+
+    transition(S_NI, PutS_NotLastCopy_NI_BypassLLC) {
+        xyzRemoveSharer;
+        sendAck;
+        popRequestQueue;
+    }
+
+    transition(S_NI, PutS_NotLastCopy_NI_InsertToLLC, S) {BankAccess} {
+        xyzRemoveSharer;
+        sendAck;
+        allocateCacheBlock;
+        writeDataToCache;
+        xyzConvertNILineToIN;
+        popRequestQueue;
+    }
+
+    transition(S_NI, PutS_LastCopy_Clean_NI_BypassLLC, InMem) {
+        xyzClearSharers;
+        sendAck;
+        xyzDeallocateMetadataNI;
+        popRequestQueue;
+    }
+
+    transition(S_NI, PutS_LastCopy_Clean_NI_InsertToLLC, LOC) {BankAccess} {
+        xyzClearSharers;
+        sendAck;
+        allocateCacheBlock;
+        writeDataToCache;
+        xyzConvertNILineToIN;
+        popRequestQueue;
+    }
+
+    transition(S_NI, PutS_LastCopy_Dirty_NI_BypassLLC, DirtyNI_to_I_await_ack) {MemAccess} {
+        xyzClearSharers;
+        writebackFromL1;
+        popRequestQueue;
+    }
+
+    transition(S_NI, PutS_LastCopy_Dirty_NI_InsertToLLC, LOD) {BankAccess} {
+        xyzClearSharers;
+        allocateCacheBlock;
+        writeDataToCache;
+        xyzConvertNILineToIN;
+        popRequestQueue;
+    }
+
+    // transitions from M_NI
+
+    transition(M_NI, GetM_NI) {
+        xyzClearOwner;
+        xyzAddOwnerNI;
+        popRequestQueue;
+    }
+
+    transition(M_NI, PutM_NI_BypassLLC, DirtyNI_to_I_await_ack) {MemAccess} {
+        xyzClearOwner;
+        writebackFromL1;
+        popRequestQueue;
+    }
+
+    transition(M_NI, PutM_NI_InsertToLLC, LOD) {BankAccess} {
+        xyzClearOwner;
+        sendAck;
+        allocateCacheBlock;
+        writeDataToCache;
+        xyzConvertNILineToIN;
+        popRequestQueue;
+    }
+
+    // transitions from DirtyNI_to_I_await_ack
+
+    transition(DirtyNI_to_I_await_ack, Mem_Ack, InMem) {
+        decrementOutstandingMemRequest;
+        profileMemWriteLatency;
+        forwardAck;
+        xyzDeallocateMetadataNI;
+        popMemResponseQueue;
+    }
 
 }
