@@ -172,39 +172,12 @@ machine(MachineType:L2Cache, "LLC") :
 
     // Interface functions required by SLICC
     State getState(TBE tbe, CacheEntry cache_entry, Addr addr) {
-        if(is_valid(getDirectoryEntry(addr))) {
-            return getDirectoryEntry(addr).state;
-        } else if (cacheMemory.containNILine(addr)) {
-            assert(false);
-            int state_idx := cacheMemory.getNIState(addr);
-            if (state_idx == 1) {
-                return State:S_NI;
-            } else if (state_idx == 2) { 
-                return State:M_NI;
-            } else if (state_idx == 3) {
-                return State:I_to_S_await_mem_data_NI;
-            } else if (state_idx == 4) {
-                return State:I_to_M_await_mem_data_NI; 
-            } else if (state_idx == 5) {
-                return State:DirtyNI_to_I_await_ack;
-            }
-        }
+        return getDirectoryEntry(addr).state;
     }
 
     void setState(TBE tbe, CacheEntry cache_entry, Addr addr, State state) {
         if(is_valid(getDirectoryEntry(addr))) {
             getDirectoryEntry(addr).state := state;
-        } else if (cacheMemory.containNILine(addr)) {
-            assert(false);
-            if (state == State:I_to_S_await_mem_data_NI) {
-                cacheMemory.setNITransientState(addr, 3);
-            } else if (state == State:I_to_M_await_mem_data_NI) {
-                cacheMemory.setNITransientState(addr, 4);
-            } else if (state == State:DirtyNI_to_I_await_ack) {
-                cacheMemory.setNITransientState(addr, 5);
-            } else {
-                cacheMemory.setNITransientState(addr, 0);
-            }
         }
     }
 
@@ -440,7 +413,15 @@ machine(MachineType:L2Cache, "LLC") :
 
     action(allocateCacheBlock, desc="Allocate a cache block") {
         assert(is_invalid(cache_entry));
-        assert(cacheMemory.cacheAvail(address));
+        if (!cacheMemory.existVacancyPerSet(address)) {
+            assert(cacheMemory.existLLCOnlyCleanLinePerSet(address));
+            Addr victim_address := cacheMemory.getLRULLCOnlyCleanLinePerSet(address);
+            DPRINTF(FlexLLC, "Deallocate: Address = %#x \n", victim_address);
+            cacheMemory.XYZDeallocate(victim_address);
+            setState(tbe, cache_entry, victim_address, State:InMem);
+        }
+        assert(cacheMemory.existVacancyPerSet(address));
+        DPRINTF(FlexLLC, "Allocate: Address = %#x \n", address);
         set_cache_entry(cacheMemory.XYZAllocate(address, new CacheEntry));
     }
 
@@ -543,7 +524,6 @@ machine(MachineType:L2Cache, "LLC") :
 
     action(sendAck, desc="Send Put acknowledgement") {
         peek(requestInPort, RequestMsg) {
-            assert(is_valid(cache_entry));
             enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
                 out_msg.reqID := in_msg.reqID;
                 out_msg.addr := address;
@@ -754,6 +734,7 @@ machine(MachineType:L2Cache, "LLC") :
         allocateCacheBlock;
         sendMemRead;
         xyzAddOwner;
+        xyzSetIsDirty;
         popRequestQueue;
     }
 
@@ -765,6 +746,8 @@ machine(MachineType:L2Cache, "LLC") :
 
     transition(InMem, GetM_NI, I_to_M_await_mem_data_NI) {BankAccess, MemAccess} {
         sendMemRead;
+        xyzAddOwnerNI;
+        xyzSetIsDirty;
         popRequestQueue;
     }
 
@@ -786,7 +769,7 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I_to_S_await_mem_data_NI, Mem_Response, S_NI) {BankAccess} {
+    transition(I_to_S_await_mem_data_NI, Mem_Response, S_NI) {
         decrementOutstandingMemRequest;
         forwardMemResponse;
         profileMemReadLatency;
@@ -794,7 +777,7 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I_to_M_await_mem_data_NI, Mem_Response, M_NI) {BankAccess} {
+    transition(I_to_M_await_mem_data_NI, Mem_Response, M_NI) {
         decrementOutstandingMemRequest;
         forwardMemResponse;
         profileMemReadLatency;
@@ -851,16 +834,19 @@ machine(MachineType:L2Cache, "LLC") :
 
     transition(S, PutS_NotLastCopy) {
         xyzRemoveSharer;
+        sendAck;
         popRequestQueue;
     }
 
     transition(S, PutS_LastCopy_Clean, LOC) {
         xyzClearSharers;
+        sendAck;
         popRequestQueue;
     }
 
     transition(S, PutS_LastCopy_Dirty, LOD) {
         xyzClearSharers;
+        sendAck;
         popRequestQueue;
     }
 
@@ -951,6 +937,12 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from M_NI
 
+    transition(M_NI, GetS_NI) {
+        xyzClearOwner;
+        xyzAddOwnerNI;
+        popRequestQueue;
+    }
+
     transition(M_NI, GetM_NI) {
         xyzClearOwner;
         xyzAddOwnerNI;
@@ -980,6 +972,12 @@ machine(MachineType:L2Cache, "LLC") :
         forwardAck;
         xyzDeallocateMetadataNI;
         popMemResponseQueue;
+    }
+
+    // unexpected transitions on transient states
+
+    transition({I_to_S_await_mem_data, I_to_S_await_mem_data_NI, I_to_M_await_mem_data, I_to_M_await_mem_data_NI}, {GetS, GetS_NI, GetM, GetM_NI}) {
+        popRequestQueue;
     }
 
 }

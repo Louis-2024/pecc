@@ -341,7 +341,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
             peek(responseInPort, ResponseMsg) {
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
-                assert(is_valid(tbe));
 
                 if (in_msg.type == CoherenceResponseType:Ack) {
                     DPRINTF(FlexLLC, "(%s) (Ack: Address = %#x, Current State = %s, Sender = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.sender);
@@ -578,7 +577,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
-    action(sendDataResponse, desc="Send data response to requestor") {
+    action(sendDataResponseFromSharer, desc="Send data response to requestor") {
         peek(requestInPort, RequestMsg) {
             if (is_valid(cache_entry)) {
                 enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
@@ -586,10 +585,27 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     out_msg.addr := address;
                     out_msg.type := CoherenceResponseType:CacheToCache;
                     out_msg.sender := machineID;
-                    // Only send data to requestor
                     out_msg.Destination.add(in_msg.requestor);
                     out_msg.dataBlk := cache_entry.dataBlk;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
+                    out_msg.owner := false;
+                }
+            }
+        }
+    }
+
+    action(sendDataResponseFromOwner, desc="Send data response to requestor") {
+        peek(requestInPort, RequestMsg) {
+            if (is_valid(cache_entry)) {
+                enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                    out_msg.reqID := in_msg.reqID;
+                    out_msg.addr := address;
+                    out_msg.type := CoherenceResponseType:CacheToCache;
+                    out_msg.sender := machineID;
+                    out_msg.Destination.add(in_msg.requestor);
+                    out_msg.dataBlk := cache_entry.dataBlk;
+                    out_msg.MessageSize := MessageSizeType:Response_Data;
+                    out_msg.owner := true;
                 }
             }
         }
@@ -717,6 +733,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
         peek(responseInPort, ResponseMsg) {
             assert(is_valid(cache_entry));
             cache_entry.dataBlk := in_msg.dataBlk;
+            if (in_msg.owner) {
+                cache_entry.owned := true;
+            }
         }
     }
 
@@ -759,7 +778,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
             // forward response to potential pending requestors
             assert(is_valid(cache_entry));
             int num_requestors := tbe.requestors.count();
-            if (cache_entry.owned && (num_requestors > 0)) {
+            if (num_requestors > 0) {
                 enqueue(responseOutPort, ResponseMsg, 1) {
                     out_msg.reqID := tbe.reqID;
                     out_msg.addr := address;
@@ -906,13 +925,13 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(S, OtherGetM, I) {
-        sendDataResponse;
+        sendDataResponseFromSharer;
         invalidateCacheEntry;
         popRequestQueue;
     }
 
     transition(S, OtherGetS) {
-        sendDataResponse;
+        sendDataResponseFromSharer;
         popRequestQueue;
     }
 
@@ -921,7 +940,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(M, {OtherGetS, OtherGetM}, I) {
-        sendDataResponse;
+        sendDataResponseFromOwner;
         invalidateCacheEntry;
         popRequestQueue;
     }
@@ -977,6 +996,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(I, BusGrantDoGetMLocked, ML_AD) {
         sendGetM;
+        popBusGrantQueue;
+    }
+
+    transition(S, BusGrantDoPut, I_AD) {
+        sendPut;
         popBusGrantQueue;
     }
 

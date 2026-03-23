@@ -777,19 +777,9 @@ CacheMemory::profilePrefetchMiss()
 
 AbstractCacheEntry* CacheMemory::XYZAllocate(Addr address, AbstractCacheEntry *entry) {
     AbstractCacheEntry* new_entry = nullptr;
-    if (existVacancyPerSet(address)) {
-        new_entry = CacheMemory::allocate(address, entry);
-    } else if (existLLCOnlyCleanLinePerSet(address)) {
-        // 1. locate LLC only clean line in the set
-        Addr victim_address = getLRULLCOnlyCleanLinePerSet(address);
-        // 2. deallocate it 
-        deallocate(victim_address);
-        // 3. allocate new line
-        new_entry = allocate(address, entry);
-        assert(lookup(address) != nullptr);
-    } else {
-        assert(false);
-    }
+    assert(existVacancyPerSet(address));
+    new_entry = allocate(address, entry);
+    assert(lookup(address) != nullptr);
     return new_entry;
 }
 

@@ -246,6 +246,7 @@ structure (CacheMemory, external = "yes") {
   bool existVacancyPerSet(Addr);
   bool existLLCOnlyCleanLinePerSet(Addr);
   bool existLLCOnlyDirtyLinePerSet(Addr address);
+  Addr getLRULLCOnlyCleanLinePerSet(Addr);
   Addr getLRULLCOnlyDirtyLinePerSet(Addr);
 
   int getNIState(Addr);
