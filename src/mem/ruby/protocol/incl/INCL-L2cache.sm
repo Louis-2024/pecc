@@ -717,6 +717,14 @@ machine(MachineType:L2Cache, "LLC") :
         cacheMemory.removeLineFromNIDirectory(address);
     }
 
+    action(stallAndWaitRequestQueue, desc="...") {
+        Addr stalled_address;
+        peek(requestInPort, RequestMsg) {
+            stalled_address := in_msg.addr;
+        }
+        stall_and_wait(requestInPort, stalled_address);
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
@@ -813,10 +821,8 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from S
 
-    transition(S, GetM, M) {
-        xyzClearSharers;
-        xyzAddOwner;
-        xyzSetIsDirty;
+    transition({S, I_to_S_await_mem_data}, GetS) {
+        xyzAddSharer;
         popRequestQueue;
     }
 
@@ -827,8 +833,17 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(S, GetS) {
-        xyzAddSharer;
+    transition(S, GetM, M) {
+        xyzClearSharers;
+        xyzAddOwner;
+        xyzSetIsDirty;
+        popRequestQueue;
+    }
+
+    transition(I_to_S_await_mem_data, GetM, I_to_M_await_mem_data) {
+        xyzClearSharers;
+        xyzAddOwner;
+        xyzSetIsDirty;
         popRequestQueue;
     }
 
@@ -852,13 +867,13 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from M
 
-    transition(M, GetS) {
+    transition({M, I_to_M_await_mem_data}, GetS) {
         xyzClearOwner;
         xyzAddOwner;
         popRequestQueue;
     }
 
-    transition(M, GetM) {
+    transition({M, I_to_M_await_mem_data}, GetM) {
         xyzClearOwner;
         xyzAddOwner;
         popRequestQueue;
@@ -873,7 +888,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from S_NI
 
-    transition(S_NI, GetS_NI) {
+    transition({S_NI, I_to_S_await_mem_data_NI}, GetS_NI) {
         xyzAddSharerNI;
         popRequestQueue;
     }
@@ -881,12 +896,21 @@ machine(MachineType:L2Cache, "LLC") :
     transition(S_NI, Upg, M_NI) {
         xyzClearSharers;
         xyzAddOwnerNI;
+        xyzSetIsDirty;
         popRequestQueue;
     }
 
     transition(S_NI, GetM_NI, M_NI) {
         xyzClearSharers;
         xyzAddOwnerNI;
+        xyzSetIsDirty;
+        popRequestQueue;
+    }
+
+    transition(I_to_S_await_mem_data_NI, GetM_NI, I_to_M_await_mem_data_NI) {
+        xyzClearSharers;
+        xyzAddOwnerNI;
+        xyzSetIsDirty;
         popRequestQueue;
     }
 
@@ -937,13 +961,13 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from M_NI
 
-    transition(M_NI, GetS_NI) {
+    transition({M_NI, I_to_M_await_mem_data_NI}, GetS_NI) {
         xyzClearOwner;
         xyzAddOwnerNI;
         popRequestQueue;
     }
 
-    transition(M_NI, GetM_NI) {
+    transition({M_NI, I_to_M_await_mem_data_NI}, GetM_NI) {
         xyzClearOwner;
         xyzAddOwnerNI;
         popRequestQueue;
@@ -965,19 +989,16 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     // transitions from DirtyNI_to_I_await_ack
-
     transition(DirtyNI_to_I_await_ack, Mem_Ack, InMem) {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
         forwardAck;
         xyzDeallocateMetadataNI;
         popMemResponseQueue;
+        wakeUpAllQueues;
     }
 
-    // unexpected transitions on transient states
-
-    transition({I_to_S_await_mem_data, I_to_S_await_mem_data_NI, I_to_M_await_mem_data, I_to_M_await_mem_data_NI}, {GetS, GetS_NI, GetM, GetM_NI}) {
-        popRequestQueue;
+    transition(DirtyNI_to_I_await_ack, {GetS, GetM, GetS_NI, GetM_NI}) {MemAccess} {
+        stallAndWaitRequestQueue;
     }
-
 }

@@ -52,7 +52,7 @@ structure(ResponseMsg, desc="Response message", interface="Message") {
     Addr                                addr,              desc="Physical address of the cache line";
     DataBlock                           dataBlk,           desc="Cache line data";
     bool                                dirty,             desc="Dirty bit of the cache line";
-    bool                                owner,             desc="";
+    bool                                owned,             desc="";
     
     CoherenceResponseType               type,              desc="Response type";
     MachineID                           sender,            desc="Sender of the response";

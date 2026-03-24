@@ -588,7 +588,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     out_msg.Destination.add(in_msg.requestor);
                     out_msg.dataBlk := cache_entry.dataBlk;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.owner := false;
+                    out_msg.owned := false;
                 }
             }
         }
@@ -605,7 +605,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     out_msg.Destination.add(in_msg.requestor);
                     out_msg.dataBlk := cache_entry.dataBlk;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.owner := true;
+                    out_msg.owned := true;
                 }
             }
         }
@@ -733,7 +733,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         peek(responseInPort, ResponseMsg) {
             assert(is_valid(cache_entry));
             cache_entry.dataBlk := in_msg.dataBlk;
-            if (in_msg.owner) {
+            if (in_msg.owned) {
                 cache_entry.owned := true;
             }
         }
@@ -788,6 +788,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     out_msg.Destination := tbe.requestors;
                     out_msg.dataBlk := cache_entry.dataBlk;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
+                    out_msg.owned := cache_entry.owned;
+                }
+                if (cache_entry.owned) {
+                    tbe.to_I := true;
                 }
             }
             if (tbe.to_I) {
@@ -879,6 +883,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
         initiateGetMLocked;
         sendBusRequest;
         popMandatoryQueue;
+    }
+
+    transition(I, DataCacheToCache) {
+        popResponseQueue;
     }
 
     transition(M, Store, M) {
@@ -1079,7 +1087,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerLocalReqCompletion;
     }
 
-    transition({CMP, S}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
+    transition({CMP, S, M}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
         popResponseQueue;
     }
 
