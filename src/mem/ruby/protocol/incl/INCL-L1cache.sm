@@ -1087,7 +1087,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerLocalReqCompletion;
     }
 
-    transition({CMP, S, M}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
+    transition({CMP, S, M, M_A, ML_A}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
         popResponseQueue;
     }
 

@@ -7,7 +7,7 @@ import tqdm
 from multiprocessing.pool import Pool
 
 
-def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB", l1i_size="16kB", mem_size="1GB"):
+def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB",  l1i_size="16kB", l1_assoc=8, llc_assoc=8, mem_size="1GB"):
     gem5_home = "/gem5/pecc"
     splash3_dir = "/gem5/pecc/splash-3-static-link/codes"
     config = f"{program}_{protocol}_{ncore}_{llc_size}"
@@ -72,6 +72,7 @@ def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB"
         f"-d {outdir} {gem5_home}/configs/example/se.py --ruby --num-cpus {ncore} "
         f"--cpu-type TimingSimpleCPU --l1d_size {l1d_size} --l1i_size {l1i_size} "
         f"--l2_size {llc_size} --mem-type SimpleMemory --mem-size {mem_size} "
+        f"--l1d_assoc {l1_assoc} --l1i_assoc {l1_assoc} --l2_assoc {llc_assoc} "
         f'-c {binary} --options="{options}"'
     )
     if stdin:
@@ -96,7 +97,10 @@ if __name__ == '__main__':
 
     cmds = []
     for program in programs:
-        mem_size = '2GB'
+        if program == 'raytrace':
+            mem_size = '4GB'
+        else:
+            mem_size = '1GB'
 
         for protocol in ['INCL', 'EXCL']:
             for core_count in [4]:
