@@ -554,7 +554,7 @@ class CacheMemory : public SimObject
 
       Addr getLRULine(std::unordered_set<Addr> lines) {
           assert(lines.size() > 0);
-          Tick LRU_time = curTick();
+          Tick LRU_time = MaxTick;
           Addr LRU_line = 0;
           
           for (const Addr& address : lines) {
@@ -566,6 +566,7 @@ class CacheMemory : public SimObject
                   LRU_line = address;
               }
           }
+          assert(LRU_line > 0);
           return LRU_line;
       }
 

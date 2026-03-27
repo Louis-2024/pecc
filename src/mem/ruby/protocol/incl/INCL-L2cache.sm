@@ -486,7 +486,6 @@ machine(MachineType:L2Cache, "LLC") :
         peek(requestInPort, RequestMsg) {
             assert(is_valid(cache_entry));
             cache_entry.dataBlk := in_msg.dataBlk;
-            cache_entry.dirty := in_msg.dirty;
             cacheMemory.setMRU(cache_entry);
         }
     }
@@ -495,7 +494,6 @@ machine(MachineType:L2Cache, "LLC") :
         peek(responseFromDirInPort, DirectoryMsg) {
             assert(is_valid(cache_entry));
             cache_entry.dataBlk := in_msg.DataBlk;
-            cache_entry.dirty := false;
             cacheMemory.setMRU(cache_entry);
         }
     }
@@ -523,28 +521,17 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     action(writebackFromL2, desc="Writeback data") {
-        peek(requestInPort, RequestMsg) {
-            assert(is_valid(cache_entry));
-            assert(in_msg.type == CoherenceRequestType:Put);
-            Entry dir_entry := getDirectoryEntry(address);
-            dir_entry.memWriteIssueTime := curCycle();
-            dir_entry.from_addr := in_msg.addr;
-            dir_entry.reqID := in_msg.reqID;
-            dir_entry.requestor := in_msg.requestor;
-            Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
-            from_dir_entry.writeback_triggered := true;
-
-            enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
-                out_msg.addr := address;
-                out_msg.Type := MemoryRequestType:MEMORY_WB;
-                out_msg.Sender := machineID;
-                out_msg.MessageSize := MessageSizeType:Writeback_Data;
-                out_msg.DataBlk := cache_entry.dataBlk;
-                out_msg.Len := 0;
-                out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
-            }
-
-            DPRINTF(FlexLLC, "writebackFromL2: Address = %#x, Current State = %s, Sender = %s \n", address, getDirectoryEntry(address).state, machineID);
+        assert(is_valid(cache_entry));
+        Entry dir_entry := getDirectoryEntry(address);
+        dir_entry.memWriteIssueTime := curCycle();
+        enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
+            out_msg.addr := address;
+            out_msg.Type := MemoryRequestType:MEMORY_WB;
+            out_msg.Sender := machineID;
+            out_msg.MessageSize := MessageSizeType:Writeback_Data;
+            out_msg.DataBlk := cache_entry.dataBlk;
+            out_msg.Len := 0;
+            out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
         }
     }
 
@@ -601,7 +588,6 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.clear();
                 out_msg.Destination.add(in_msg.requestor);
                 out_msg.dataBlk := cache_entry.dataBlk;
-                out_msg.dirty := cache_entry.dirty;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
             }
 
@@ -636,7 +622,6 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.clear();
                 out_msg.Destination.add(in_msg.requestor);
                 out_msg.dataBlk := cache_entry.dataBlk;
-                out_msg.dirty := cache_entry.dirty;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
             }
             DPRINTF(FlexLLC, "sendDataFromCache: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
