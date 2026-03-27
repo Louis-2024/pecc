@@ -47,6 +47,7 @@ import re
 
 python_class_map = {
                     "int": "Int",
+                    "Addr": "Addr",
                     "NodeID": "Int",
                     "uint32_t" : "UInt32",
                     "std::string": "String",
