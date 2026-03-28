@@ -141,7 +141,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
         NetDest requestors,                     desc="Pending requestors";
         bool isLockRequest,                     desc="Indicator of lock request";
         Addr from_addr,                         desc="Address of request that triggers replacement";
-        bool to_I,                              desc="Indicator of invalidation";    
+        bool to_I,                              desc="Indicator of invalidation"; 
+
+        NetDest sharers_to_remove,              desc="";   
     }
 
     structure(TBETable, external="yes") {
@@ -631,7 +633,26 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
-    action(sendDataResponseFromSharer, desc="Send data response to requestor") {
+    action(sendDataResponseFromSharerToSharer, desc="Send data response to requestor") {
+        peek(requestInPort, RequestMsg) {
+            if (is_valid(cache_entry)) {
+                enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                    out_msg.reqID := in_msg.reqID;
+                    out_msg.addr := address;
+                    out_msg.type := CoherenceResponseType:CacheToCache;
+                    out_msg.sender := machineID;
+                    out_msg.Destination.add(in_msg.requestor);
+                    out_msg.dataBlk := cache_entry.dataBlk;
+                    out_msg.MessageSize := MessageSizeType:Response_Data;
+                    out_msg.dirty := cache_entry.dirty;
+                    out_msg.owned := false;
+                    out_msg.sharers := cache_entry.sharers;
+                }
+            }
+        }
+    }
+
+    action(sendDataResponseFromSharerToOwner, desc="Send data response to requestor") {
         peek(requestInPort, RequestMsg) {
             if (is_valid(cache_entry)) {
                 enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
@@ -798,6 +819,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
             if (in_msg.owned) {
                 cache_entry.owned := true;
             }
+            cache_entry.sharers.addNetDest(in_msg.sharers);
         }
     }
 
@@ -823,6 +845,19 @@ machine(MachineType:L1Cache, "L1 Cache") :
             assert(is_valid(cache_entry));
             cache_entry.sharers.remove(in_msg.requestor);
         }
+    }
+
+    action(asyncStartRemoveSharer, desc="") {
+        peek(requestInPort, RequestMsg) {
+            assert(is_valid(tbe));
+            tbe.sharers_to_remove.add(in_msg.requestor);
+        }
+    }
+
+    action(asyncCompleteRemoveSharer, desc="") {
+        assert(is_valid(tbe));
+        cache_entry.sharers.removeNetDest(tbe.sharers_to_remove);
+        tbe.sharers_to_remove.clear();
     }
 
     action(setSharer, desc="Set sharer to itself") {
@@ -861,7 +896,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
                 // forward response to potential pending requestors
                 assert(is_valid(cache_entry));
                 int num_requestors := getNumSharer(tbe.requestors);
-                if (cache_entry.owned && (num_requestors > 0)) {
+                if (num_requestors > 0) {
+                    NetDest sharers := cache_entry.sharers;
+                    if (cache_entry.owned) {
+                        tbe.to_I := true;
+                    }
+                    if (tbe.to_I) {
+                        sharers.clear();
+                    }
                     enqueue(responseOutPort, ResponseMsg, 1) {
                         out_msg.reqID := tbe.reqID;
                         out_msg.addr := address;
@@ -872,10 +914,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
                         out_msg.dataBlk := cache_entry.dataBlk;
                         out_msg.dirty := cache_entry.dirty;
                         out_msg.owned := cache_entry.owned;
+                        out_msg.sharers := sharers;
                         out_msg.MessageSize := MessageSizeType:Response_Data;
-                    }
-                    if (cache_entry.owned) {
-                        tbe.to_I := true;
                     }
                 }
                 if (tbe.to_I) {
@@ -1015,14 +1055,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(S, OtherGetM, I) {
-        sendDataResponseFromSharer;
+        sendDataResponseFromSharerToOwner;
         invalidateCacheEntry;
         popRequestQueue;
     }
 
     transition(S, OtherGetS) {
         addSharer;
-        sendDataResponseFromSharer;
+        sendDataResponseFromSharerToSharer;
         popRequestQueue;
     }
 
@@ -1168,7 +1208,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(S_D, OtherPut_NotLast) {
-        removeSharer;
+        asyncStartRemoveSharer;
         popRequestQueue;
     }
 
@@ -1204,6 +1244,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(S_D, DataCacheToCache, CMP) {
         writeDataResponseToCache;
+        asyncCompleteRemoveSharer;
         externalLoadHit;
         popResponseQueue;
         triggerLocalReqCompletion;

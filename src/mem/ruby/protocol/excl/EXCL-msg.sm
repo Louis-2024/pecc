@@ -57,6 +57,7 @@ structure(ResponseMsg, desc="Response message", interface="Message") {
     DataBlock                           dataBlk,           desc="Cache line data";
     bool                                dirty,             desc="Dirty bit of the cache line";
     bool                                owned,             desc="";
+    NetDest                             sharers,           desc="";
     
     CoherenceResponseType               type,              desc="Response type";
     MachineID                           sender,            desc="Sender of the response";
