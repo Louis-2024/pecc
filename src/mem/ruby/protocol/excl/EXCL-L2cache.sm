@@ -229,8 +229,10 @@ machine(MachineType:L2Cache, "LLC") :
                 TBE tbe := TBEs[in_msg.addr];
 
                 if (in_msg.Type == MemoryRequestType:MEMORY_READ) {
+                    DPRINTF(FlexLLC, "Mem_Response: Address = %#x, Current State = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr));
                     trigger(Event:Mem_Response, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.Type == MemoryRequestType:MEMORY_WB) {
+                    DPRINTF(FlexLLC, "Mem_Ack: Address = %#x, Current State = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr));
                     trigger(Event:Mem_Ack, in_msg.addr, cache_entry, tbe);
                 } else {
                     error("Invalid memory response message");
@@ -256,13 +258,16 @@ machine(MachineType:L2Cache, "LLC") :
                 TBE tbe := TBEs[in_msg.addr];
 
                 if (in_msg.type == CoherenceRequestType:GetS || in_msg.type == CoherenceRequestType:GetM) {
+                    DPRINTF(FlexLLC, "Get: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                     trigger(Event:Get, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.type == CoherenceRequestType:Put && in_msg.writeback) {
                     assert(is_invalid(cache_entry));
                     if (cacheMemory.cacheAvail(in_msg.addr)) {
                         if (in_msg.dirty) {
+                            DPRINTF(FlexLLC, "Put_Dirty: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                             trigger(Event:Put_Dirty, in_msg.addr, cache_entry, tbe); 
                         } else {
+                            DPRINTF(FlexLLC, "Put_Clean: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                             trigger(Event:Put_Clean, in_msg.addr, cache_entry, tbe); 
                         }
                     } else {
@@ -270,6 +275,7 @@ machine(MachineType:L2Cache, "LLC") :
                         Addr victim_addr := cacheMemory.cacheProbe(in_msg.addr);
                         CacheEntry victim_entry := getCacheEntry(victim_addr);
                         TBE victim_tbe := TBEs[victim_addr];
+                        DPRINTF(FlexLLC, "Replacement: Address = %#x \n", victim_addr);
                         trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
                     }
                 } else {
@@ -288,12 +294,14 @@ machine(MachineType:L2Cache, "LLC") :
     action(allocateCacheBlock, desc="Allocate a cache block") {
         assert(is_invalid(cache_entry));
         assert(cacheMemory.cacheAvail(address));
+        DPRINTF(FlexLLC, "Allocate: Address = %#x \n", address);
         set_cache_entry(cacheMemory.allocate(address, new CacheEntry));
     }
 
     action(deallocateCacheBlock, desc="Deallocate a cache block") {
         assert(is_valid(cache_entry));
         cacheMemory.deallocate(address);
+        DPRINTF(FlexLLC, "Deallocate: Address = %#x \n", address);
         unset_cache_entry();
     }
 
@@ -323,6 +331,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Len := 0;
                 out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
             }
+            DPRINTF(FlexLLC, "sendMemRead: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
         }
     }
 
@@ -347,6 +356,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Len := 0;
                 out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
             }
+            DPRINTF(FlexLLC, "writeback: Address = %#x, Current State = %s, Sender = %s \n", address, getDirectoryEntry(address).state, machineID);
         }
     }
 
@@ -363,6 +373,7 @@ machine(MachineType:L2Cache, "LLC") :
                     out_msg.Destination.add(in_msg.requestor);
                     out_msg.MessageSize := MessageSizeType:Writeback_Control;
                 }
+                DPRINTF(FlexLLC, "checkAndSendAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
             }
         }
         dir_entry.writeback_triggered := false;  // reset
@@ -379,6 +390,7 @@ machine(MachineType:L2Cache, "LLC") :
             out_msg.Destination.add(dir_entry.requestor);
             out_msg.MessageSize := MessageSizeType:Writeback_Control;
         }
+        DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, dir_entry.requestor);
     }
 
     action(sendDataFromCache, desc="Send data from cache entry") {
@@ -397,6 +409,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.dirty := cache_entry.dirty;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
             }
+            DPRINTF(FlexLLC, "sendDataFromCache: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
         }
     }
 
@@ -412,6 +425,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.dataBlk := in_msg.DataBlk;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
             }
+            DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, in_msg.OriginalRequestorMachId);
         }
     }
 
