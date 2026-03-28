@@ -5,6 +5,7 @@
 // CoherenceRequestType
 enumeration(CoherenceRequestType, desc="Types of coherence requests") {
     GetS,           desc="Get read-only permission";
+    GetS_nop,       desc="";
     GetM,           desc="Get read/write permission";
     Upg,            desc="Upgrade";
     Put,            desc="Put";
