@@ -47,7 +47,7 @@ machine(MachineType:L2Cache, "LLC") :
         Must_Be_Privately_Cached, AccessPermission:Maybe_Stale, desc="PC";
 
         // transient state for memory read/write pending
-        I_to_MAPC_await_data, AccessPermission:Busy, desc="";
+        I_to_MBPC_await_data, AccessPermission:Busy, desc="";
         I_to_PC_await_data, AccessPermission:Busy, desc="";
         I_to_I_await_data, AccessPermission:Busy, desc="";
         I_to_IPC_await_data, AccessPermission:Busy, desc="";
@@ -84,8 +84,7 @@ machine(MachineType:L2Cache, "LLC") :
     // Directory entry
     structure(Entry, desc="Directory entry", interface="AbstractCacheEntry", main="false") {
         State state, desc="State";
-        Cycles reqID, desc="Req ID";
-        MachineID requestor, desc="requestor";
+        NetDest requestors, desc="requestor";
         Addr from_addr, desc="Address of request that triggers replacement";
         Cycles memReadIssueTime, desc="Performance metric monitor field";
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
@@ -401,8 +400,8 @@ machine(MachineType:L2Cache, "LLC") :
     action(sendMemRead, desc="Send memory read request") {
         peek(requestInPort, RequestMsg) {
             Entry dir_entry := getDirectoryEntry(address);
-            dir_entry.requestor := in_msg.requestor;
-            dir_entry.reqID := in_msg.reqID;
+            dir_entry.requestors.clear();
+            dir_entry.requestors.add(in_msg.requestor);
             dir_entry.memReadIssueTime := curCycle();
 
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
@@ -416,6 +415,19 @@ machine(MachineType:L2Cache, "LLC") :
 
             DPRINTF(FlexLLC, "sendMemRead: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
         }
+    }
+
+    action(addRequestorToMemRead, desc="") {
+        peek(requestInPort, RequestMsg) {
+            Entry dir_entry := getDirectoryEntry(address);
+            dir_entry.requestors.add(in_msg.requestor);
+            DPRINTF(FlexLLC, "addRequestorToMemRead: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
+        }
+    }
+
+    action(clearRequestor, desc="") {
+        Entry dir_entry := getDirectoryEntry(address);
+        dir_entry.requestors.clear();
     }
 
     action(writebackToMem, desc="Writeback data") {
@@ -436,7 +448,6 @@ machine(MachineType:L2Cache, "LLC") :
     action(sendAck, desc="Send Put acknowledgement") {
         peek(requestInPort, RequestMsg) {
             enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                out_msg.reqID := in_msg.reqID;
                 out_msg.addr := address;
                 out_msg.type := CoherenceResponseType:Ack;
                 out_msg.sender := machineID;
@@ -454,7 +465,6 @@ machine(MachineType:L2Cache, "LLC") :
             assert(is_valid(cache_entry));
             cacheMemory.setMRU(cache_entry);
             enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                out_msg.reqID := in_msg.reqID;
                 out_msg.addr := address;
                 out_msg.type := CoherenceResponseType:FromLLC;
                 out_msg.sender := machineID;
@@ -471,15 +481,14 @@ machine(MachineType:L2Cache, "LLC") :
     action(forwardAck, desc="Send Put acknowledgement") {
         Entry dir_entry := getDirectoryEntry(address);
         enqueue(responseOutPort, ResponseMsg, 1) {
-            out_msg.reqID := dir_entry.reqID;
             out_msg.addr := dir_entry.from_addr;
             out_msg.type := CoherenceResponseType:Ack;
             out_msg.sender := machineID;
             out_msg.Destination.clear();
-            out_msg.Destination.add(dir_entry.requestor);
+            out_msg.Destination.addNetDest(dir_entry.requestors);
             out_msg.MessageSize := MessageSizeType:Writeback_Control;
         }
-        DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, dir_entry.requestor);
+        DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, dir_entry.requestors);
     }
 
     action(sendDataFromCache, desc="Send data from cache entry") {
@@ -488,7 +497,6 @@ machine(MachineType:L2Cache, "LLC") :
             assert(is_invalid(tbe));
 
             enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                out_msg.reqID := in_msg.reqID;
                 out_msg.addr := address;
                 out_msg.type := CoherenceResponseType:FromLLC;
                 out_msg.sender := machineID;
@@ -501,20 +509,19 @@ machine(MachineType:L2Cache, "LLC") :
         }
     }
 
-    action(forwardMemResponse, desc="Forward memory data response") { // todo: for GetS, add requestor when receiving Get request during transient state waiting for data
+    action(forwardMemResponse, desc="Forward memory data response") {
         Entry dir_entry := getDirectoryEntry(address);
         peek(responseFromDirInPort, DirectoryMsg) {
             enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                out_msg.reqID := dir_entry.reqID;
                 out_msg.addr := in_msg.addr;
                 out_msg.type := CoherenceResponseType:FromMemory;
                 out_msg.sender := in_msg.Sender;
                 out_msg.Destination.clear();
-                out_msg.Destination.add(dir_entry.requestor);
+                out_msg.Destination.addNetDest(dir_entry.requestors);
                 out_msg.dataBlk := in_msg.DataBlk;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
             }
-            DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, dir_entry.requestor);
+            DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, dir_entry.requestors);
         }
     }
     
@@ -610,16 +617,17 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transactions from invalid states
 
-    transition(I, GetS, I_to_MAPC_await_data) {BankAccess, MemAccess} {
+    transition(I, GetS, I_to_MBPC_await_data) {BankAccess, MemAccess} {
         allocateCacheBlock;
         sendMemRead;
         popRequestQueue;
     }
 
-    transition(I_to_MAPC_await_data, Mem_Response, May_Be_Privately_Cached) {BankAccess} {
+    transition(I_to_MBPC_await_data, Mem_Response, May_Be_Privately_Cached) {BankAccess} {
         decrementOutstandingMemRequest;
         writeMemResponseToCache;
         forwardMemResponse;
+        clearRequestor;
         profileMemReadLatency;
         popMemResponseQueue;
         wakeUpAllQueues;
@@ -637,6 +645,7 @@ machine(MachineType:L2Cache, "LLC") :
         decrementOutstandingMemRequest;
         writeMemResponseToCache;
         forwardMemResponse;
+        clearRequestor;
         profileMemReadLatency;
         popMemResponseQueue;
         wakeUpAllQueues;
@@ -650,6 +659,7 @@ machine(MachineType:L2Cache, "LLC") :
     transition(I_to_I_await_data, Mem_Response, I) {
         decrementOutstandingMemRequest;
         forwardMemResponse;
+        clearRequestor;
         profileMemReadLatency;
         popMemResponseQueue;
         wakeUpAllQueues;
@@ -663,6 +673,7 @@ machine(MachineType:L2Cache, "LLC") :
     transition(I_to_IPC_await_data, Mem_Response, I_Must_Be_Privately_Cached) {
         decrementOutstandingMemRequest;
         forwardMemResponse;
+        clearRequestor;
         profileMemReadLatency;
         popMemResponseQueue;
         wakeUpAllQueues;
@@ -788,13 +799,67 @@ machine(MachineType:L2Cache, "LLC") :
         deallocateCacheBlock;
     }
 
-    // stall
+    // transient states
 
-    transition({I_to_MAPC_await_data, I_to_PC_await_data}, {Replacement_Silent, Replacement_Writeback}) {
+    transition({I_to_MBPC_await_data, I_to_PC_await_data}, {Replacement_Silent, Replacement_Writeback}) {
         stallAndWaitRequestQueue;
     }
 
-    transition({I_to_MAPC_await_data, I_to_PC_await_data,I_to_I_await_data, I_to_IPC_await_data}, {GetS, GetS_NI, GetM, GetM_NI}) {
+    // I_to_MBPC_await_data
+
+    transition(I_to_MBPC_await_data, {GetS, GetS_NI}) {
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_MBPC_await_data, {GetM, GetM_NI}, I_to_PC_await_data) {
+        setDirty;
+        setStale;
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    // I_to_I_await_data
+
+    transition(I_to_I_await_data, GetS_NI) {
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_I_await_data, GetM_NI, I_to_IPC_await_data) {
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_I_await_data, GetS, I_to_MBPC_await_data) {
+        allocateCacheBlock;
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_I_await_data, GetM, I_to_PC_await_data) {
+        allocateCacheBlock;
+        setDirty;
+        setStale;
+        popRequestQueue;
+    }
+
+    // I_to_PC_await_data
+
+    transition(I_to_PC_await_data, {GetS, GetS_NI, GetM, GetM_NI}) {
+        popRequestQueue;
+    }
+
+    // I_to_IPC_await_data
+
+    transition(I_to_IPC_await_data, {GetS_NI, GetM_NI}) {
+        popRequestQueue;
+    }
+
+    transition(I_to_IPC_await_data, {GetS, GetM}, I_to_PC_await_data) {
+        allocateCacheBlock;
+        setDirty;
+        setStale;
         popRequestQueue;
     }
 }

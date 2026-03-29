@@ -132,7 +132,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         
         // Transaction buffer fields                   
         CoherenceRequestType requestType,       desc="Pending request type";
-        Cycles reqID,                           desc="Request ID";
         NetDest requestors,                     desc="Pending requestors";
         bool isLockRequest,                     desc="Indicator of lock request";
         Addr from_addr,                         desc="Address of request that triggers replacement";
@@ -515,7 +514,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         assert(is_valid(tbe));
         profiler.profileGetRequest();
         enqueue(requestOutPort, RequestMsg, 1) {
-            out_msg.reqID := curCycle();
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:GetS;
             out_msg.requestor := machineID;
@@ -531,8 +529,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         assert(is_valid(tbe));
         profiler.profileGetRequest();
         enqueue(requestOutPort, RequestMsg, 1) {
-            out_msg.reqID := curCycle();
-            out_msg.reqID := curCycle();
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:GetM;
             out_msg.requestor := machineID;
@@ -547,7 +543,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
     action(sendUpg, desc="Issue Upg") {
         assert(is_valid(tbe));
         enqueue(requestOutPort, RequestMsg, 1) {
-            out_msg.reqID := curCycle();
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:Upg;
             out_msg.requestor := machineID;
@@ -564,7 +559,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         assert(is_valid(cache_entry));
         profiler.profilePutRequest();
         enqueue(requestOutPort, RequestMsg, 1) {
-            out_msg.reqID := curCycle();
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:Put;
             out_msg.requestor := machineID;
@@ -577,28 +571,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
-    action(sendDataResponseFromSharer, desc="Send data response to requestor") {
-        peek(requestInPort, RequestMsg) {
-            if (is_valid(cache_entry)) {
-                enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                    out_msg.reqID := in_msg.reqID;
-                    out_msg.addr := address;
-                    out_msg.type := CoherenceResponseType:CacheToCache;
-                    out_msg.sender := machineID;
-                    out_msg.Destination.add(in_msg.requestor);
-                    out_msg.dataBlk := cache_entry.dataBlk;
-                    out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.owned := false;
-                }
-            }
-        }
-    }
-
     action(sendDataResponseFromOwner, desc="Send data response to requestor") {
         peek(requestInPort, RequestMsg) {
             if (is_valid(cache_entry)) {
                 enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                    out_msg.reqID := in_msg.reqID;
                     out_msg.addr := address;
                     out_msg.type := CoherenceResponseType:CacheToCache;
                     out_msg.sender := machineID;
@@ -754,10 +730,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         if (!tbe.to_I) {
             peek(requestInPort, RequestMsg) {
                 tbe.requestors.add(in_msg.requestor);
-                // record the request ID of the first request
-                if (tbe.requestors.count() == 0) {
-                    tbe.reqID := in_msg.reqID;
-                }
             }
         }
     }
@@ -778,9 +750,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
             // forward response to potential pending requestors
             assert(is_valid(cache_entry));
             int num_requestors := tbe.requestors.count();
-            if (num_requestors > 0) {
+            if (cache_entry.owned && (num_requestors > 0)) {
                 enqueue(responseOutPort, ResponseMsg, 1) {
-                    out_msg.reqID := tbe.reqID;
                     out_msg.addr := address;
                     out_msg.type := CoherenceResponseType:CacheToCache;
                     out_msg.sender := machineID;
@@ -790,9 +761,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
                     out_msg.MessageSize := MessageSizeType:Response_Data;
                     out_msg.owned := cache_entry.owned;
                 }
-                if (cache_entry.owned) {
-                    tbe.to_I := true;
-                }
+                tbe.to_I := true;
             }
             if (tbe.to_I) {
                 deallocateCacheEntry(address);
@@ -989,7 +958,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popBusGrantQueue;
         triggerLocalReqCompletion;
     }
-    
+
     transition(I, BusGrantDoGetS, S_AD) {
         sendGetS;
         popBusGrantQueue;
