@@ -108,8 +108,6 @@ CacheMemory::init()
                                 m_replacementPolicy_ptr->instantiateEntry();
         }
     }
-
-    XYZInit();
 }
 
 CacheMemory::~CacheMemory()
@@ -335,8 +333,49 @@ CacheMemory::cacheProbe(Addr address) const
         candidates.push_back(static_cast<ReplaceableEntry*>(
                                                        m_cache[cacheSet][i]));
     }
+    assert(candidates.size() > 0);
     return m_cache[cacheSet][m_replacementPolicy_ptr->
                         getVictim(candidates)->getWay()]->m_Address;
+}
+
+Addr
+CacheMemory::cacheProbe_clean_or_stale(Addr address) const
+{
+    assert(address == makeLineAddress(address));
+    assert(clean_or_stale_avail(address));
+    AbstractCacheEntry* victim_entry = nullptr;
+    Tick lastAccessTime = MaxTick;
+    int64_t cacheSet = addressToCacheSet(address);
+    for (int i = 0; i < m_cache_assoc; i++) {
+        AbstractCacheEntry* current_entry = m_cache[cacheSet][i];
+        if (current_entry == nullptr) {
+            continue;
+        }
+        if ((!current_entry->getDirty()) || (current_entry->getStale())) {
+            if (current_entry->getLastAccess() < lastAccessTime){
+                victim_entry = current_entry;
+                lastAccessTime = current_entry->getLastAccess();
+            }
+        }
+    }
+    assert(victim_entry != nullptr);
+    return victim_entry->m_Address;
+}
+
+bool
+CacheMemory::clean_or_stale_avail(Addr address) const
+{
+    int64_t cacheSet = addressToCacheSet(address);
+    for (int i = 0; i < m_cache_assoc; i++) {
+        AbstractCacheEntry* entry = m_cache[cacheSet][i];
+        if (entry == nullptr) {
+            continue;
+        }
+        if ((!entry->getDirty()) || (entry->getStale())) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // looks an address up in the cache
@@ -771,27 +810,6 @@ void
 CacheMemory::profilePrefetchMiss()
 {
     cacheMemoryStats.m_prefetch_misses++;
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
-AbstractCacheEntry* CacheMemory::XYZAllocate(Addr address, AbstractCacheEntry *entry) {
-    AbstractCacheEntry* new_entry = nullptr;
-    assert(existVacancyPerSet(address));
-    new_entry = allocate(address, entry);
-    assert(lookup(address) != nullptr);
-    return new_entry;
-}
-
-void CacheMemory::XYZDeallocate(Addr address) {
-    assert(containLLCLine(address));
-    deallocate(address);
-    removeLineFromLLCDirectory(address);
-}
-
-void CacheMemory::XYZInit() {
-    LLC_directory.resize(m_cache_num_sets);
-    NI_directory.resize(m_cache_num_sets);
 }
 
 } // namespace ruby

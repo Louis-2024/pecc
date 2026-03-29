@@ -849,11 +849,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
     
     // Transition on CPU request
 
-    transition(I, Replacement) {
+    transition({I, S}, Replacement) {
         deallocateCacheEntry;
     }
 
-    transition({S, M}, Replacement) {
+    transition(M, Replacement) {
         allocateTBE;
         initiateReplacement;
         sendBusRequest;
@@ -933,13 +933,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(S, OtherGetM, I) {
-        sendDataResponseFromSharer;
         invalidateCacheEntry;
         popRequestQueue;
     }
 
     transition(S, OtherGetS) {
-        sendDataResponseFromSharer;
         popRequestQueue;
     }
 
@@ -991,7 +989,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popBusGrantQueue;
         triggerLocalReqCompletion;
     }
-
+    
     transition(I, BusGrantDoGetS, S_AD) {
         sendGetS;
         popBusGrantQueue;
@@ -1004,11 +1002,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(I, BusGrantDoGetMLocked, ML_AD) {
         sendGetM;
-        popBusGrantQueue;
-    }
-
-    transition(S, BusGrantDoPut, I_AD) {
-        sendPut;
         popBusGrantQueue;
     }
 

@@ -36,25 +36,23 @@ machine(MachineType:L2Cache, "LLC") :
     // STATES
     ////////////////////////////////////////////////////////////////////////////
 
-    state_declaration(State, desc="State", default="L2Cache_State_InMem") {
-        // stable states
-        InMem, AccessPermission:Invalid, desc="Cache line data is in memory, not in caching hierarchy";
-        LOC, AccessPermission:Read_Write, desc="LLC-only clean";
-        LOD, AccessPermission:Read_Write, desc="LLC-only dirty";
+    state_declaration(State, desc="State", default="L2Cache_State_I") {
+        // invalid states
+        I, AccessPermission:Invalid, desc="";
+        I_Must_Be_Privately_Cached, AccessPermission:Invalid, desc="IPC";
 
-        S, AccessPermission:Read_Only, desc="S";
-        M, AccessPermission:Maybe_Stale, desc="M";
-        S_NI, AccessPermission:Maybe_Stale, desc="Non-Inclusive S";
-        M_NI, AccessPermission:Maybe_Stale, desc="Non-Inclusive M";
+        // valid states
+        Must_Be_LLC_Only, AccessPermission:Read_Write, desc="LO";
+        May_Be_Privately_Cached, AccessPermission:Read_Only, desc="MBPC";
+        Must_Be_Privately_Cached, AccessPermission:Maybe_Stale, desc="PC";
 
         // transient state for memory read/write pending
-        I_to_S_await_mem_data, AccessPermission:Busy, desc="";
-        I_to_M_await_mem_data, AccessPermission:Busy, desc="";
-        LOD_to_LOC_await_ack_await_allocation, AccessPermission:Busy, desc="";
-
-        I_to_S_await_mem_data_NI, AccessPermission:Busy, desc="";
-        I_to_M_await_mem_data_NI, AccessPermission:Busy, desc="";
-        DirtyNI_to_I_await_ack, AccessPermission:Busy, desc="";
+        I_to_MAPC_await_data, AccessPermission:Busy, desc="";
+        I_to_PC_await_data, AccessPermission:Busy, desc="";
+        I_to_I_await_data, AccessPermission:Busy, desc="";
+        I_to_IPC_await_data, AccessPermission:Busy, desc="";
+        MBPC_to_I_await_ack, AccessPermission:Busy, desc="";
+        LO_to_I_await_ack, AccessPermission:Busy, desc="";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -62,35 +60,21 @@ machine(MachineType:L2Cache, "LLC") :
     ////////////////////////////////////////////////////////////////////////////
 
     enumeration(Event, desc="Cache events") {
-        DontCare_Request, desc="";
-
         GetS, desc="";
         GetM, desc="";
-
         GetS_NI, desc="";
         GetM_NI, desc="";
 
-        PutS_NotLastCopy, desc="";
-        PutS_LastCopy_Clean, desc="";
-        PutS_LastCopy_Dirty, desc="";
         PutM, desc="";
-        PutLOD, desc="";
-        Put_InvalidReq, dest="";
 
-        PutS_NotLastCopy_NI_BypassLLC, desc="";
-        PutS_NotLastCopy_NI_InsertToLLC, desc="";
-        PutS_LastCopy_Clean_NI_BypassLLC, desc="";
-        PutS_LastCopy_Clean_NI_InsertToLLC, desc="";
-        PutS_LastCopy_Dirty_NI_BypassLLC, desc="";
-        PutS_LastCopy_Dirty_NI_InsertToLLC, desc="";
-        PutM_NI_BypassLLC, desc="";
-        PutM_NI_InsertToLLC, desc="";
+        Mem_Response, desc="";
+        Mem_Ack, desc="";
 
-        // Events triggered by receiving memory responses
-        Mem_Response, desc="...";
-        Mem_Ack, desc="...";
-        Sync, desc="";
-        Upg, desc="...";
+        Replacement_Silent, desc="";
+        Replacement_Writeback, desc="";
+        Upgrade, desc="";
+
+        NOP, desc="";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -103,7 +87,6 @@ machine(MachineType:L2Cache, "LLC") :
         Cycles reqID, desc="Req ID";
         MachineID requestor, desc="requestor";
         Addr from_addr, desc="Address of request that triggers replacement";
-        bool writeback_triggered, desc="Indicator of chained eviction";
         Cycles memReadIssueTime, desc="Performance metric monitor field";
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
     }
@@ -112,10 +95,13 @@ machine(MachineType:L2Cache, "LLC") :
     structure(CacheEntry, desc="Cache entry", interface="AbstractCacheEntry") {
         DataBlock dataBlk,      desc="Data block";
         bool dirty,             desc="Dirty bit";
+        bool stale,             desc="Stale bit";
+
+        bool getDirty() { return dirty; }
+        bool getStale() { return stale; }
     }
 
     // TBE
-    // TBE is not really used here
     structure(TBE, desc="Transaction buffer entry") {
         bool dummy_field;
     }
@@ -146,15 +132,6 @@ machine(MachineType:L2Cache, "LLC") :
     void unset_tbe();
     MachineID mapAddressToMachine(Addr addr, MachineType mtype);
     void wakeUpAllBuffers();
-
-    // Helper function
-    Cycles max(Cycles a, Cycles b) {
-        if (a > b) {
-            return a;
-        } else {
-            return b;
-        }
-    }
 
     CacheEntry getCacheEntry(Addr address), return_by_pointer="yes" {
         return static_cast(CacheEntry, "pointer", cacheMemory.lookup(address));
@@ -288,168 +265,92 @@ machine(MachineType:L2Cache, "LLC") :
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
 
-                if ((victim_addr != zero_addr) && (getState(TBEs[victim_addr], getCacheEntry(victim_addr), victim_addr) == State:LOD_to_LOC_await_ack_await_allocation)) {
+                if ((victim_addr != zero_addr) && ((getState(TBEs[victim_addr], getCacheEntry(victim_addr), victim_addr) == State:MBPC_to_I_await_ack) || (getState(TBEs[victim_addr], getCacheEntry(victim_addr), victim_addr) == State:LO_to_I_await_ack))) {
                     stall_and_wait(requestInPort, victim_addr);
                 } else {
                     if (in_msg.type == CoherenceRequestType:GetS) {
-                        if (cacheMemory.containLLCLine(in_msg.addr)) {
+                        // GetS
+                        if (cacheMemory.isTagPresent(in_msg.addr)) {
                             DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                             trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
-                        } else if (cacheMemory.containNILine(in_msg.addr)) {
-                            DPRINTF(FlexLLC, "GetS_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                            trigger(Event:GetS_NI, in_msg.addr, cache_entry, tbe);
                         } else {
-                            if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
+                            // if there exists vac, fetch as IN
+                            if(cacheMemory.cacheAvail(in_msg.addr)) {
                                 DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                                 trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
+                            } else if (cacheMemory.clean_or_stale_avail(in_msg.addr)) {
+                                // if there exist clean / stale lines lines, fetch as IN after silent replacement
+                                victim_addr := cacheMemory.cacheProbe_clean_or_stale(in_msg.addr);
+                                CacheEntry victim_entry := getCacheEntry(victim_addr);
+                                TBE victim_tbe := TBEs[victim_addr];
+                                assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
+                                assert((!victim_entry.dirty) || (victim_entry.stale));
+                                DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
+                                trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
                             } else {
                                 DPRINTF(FlexLLC, "GetS_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                                 trigger(Event:GetS_NI, in_msg.addr, cache_entry, tbe);
                             }
                         }
                     } else if (in_msg.type == CoherenceRequestType:GetM) {
-                        if (cacheMemory.containLLCLine(in_msg.addr)) {
+                        // GetM
+                        if (cacheMemory.isTagPresent(in_msg.addr)) {
                             DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                             trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
-                        } else if (cacheMemory.containNILine(in_msg.addr)) {
-                            DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                            trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
                         } else {
-                            DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                            trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
+                            // if there exists vac, fetch as IN
+                            if(cacheMemory.cacheAvail(in_msg.addr)) {
+                                DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
+                            } else if (cacheMemory.clean_or_stale_avail(in_msg.addr)) {
+                                // if there exist clean / stale lines lines, fetch as IN after silent replacement
+                                victim_addr := cacheMemory.cacheProbe_clean_or_stale(in_msg.addr);
+                                CacheEntry victim_entry := getCacheEntry(victim_addr);
+                                TBE victim_tbe := TBEs[victim_addr];
+                                assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
+                                assert((!victim_entry.dirty) || (victim_entry.stale));
+                                DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
+                                trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
+                            } else {
+                                DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
+                            }
                         }
                     } else if (in_msg.type == CoherenceRequestType:Put) {
-                        if (cacheMemory.getOwner(in_msg.addr).count() == 1) {
-                            // PutM
-                            if (cacheMemory.containLLCLine(in_msg.addr)) {
-                                // IN
-                                assert(getState(tbe, cache_entry, in_msg.addr) == State:M);
+                        // PutM
+                        if (cacheMemory.isTagPresent(in_msg.addr)) {
+                            assert(getState(tbe, cache_entry, in_msg.addr) == State:Must_Be_Privately_Cached);
+                            DPRINTF(FlexLLC, "PutM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:PutM, in_msg.addr, cache_entry, tbe);
+                        } else {
+                            // NI
+                            assert(getState(tbe, cache_entry, in_msg.addr) == State:I_Must_Be_Privately_Cached);
+                            if (cacheMemory.cacheAvail(in_msg.addr)) {
+                                // if there exists vac, insert directly
                                 DPRINTF(FlexLLC, "PutM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                                 trigger(Event:PutM, in_msg.addr, cache_entry, tbe);
-                            } else if (cacheMemory.containNILine(in_msg.addr)) {
-                                // NI
-                                assert(getState(tbe, cache_entry, in_msg.addr) == State:M_NI);
-                                if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
-                                    DPRINTF(FlexLLC, "PutM_NI_InsertToLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                    trigger(Event:PutM_NI_InsertToLLC, in_msg.addr, cache_entry, tbe);
-                                } else if (cacheMemory.existLLCOnlyDirtyLinePerSet(in_msg.addr)) {
-                                    victim_addr := cacheMemory.getLRULLCOnlyDirtyLinePerSet(in_msg.addr);
-                                    CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                    TBE victim_tbe := TBEs[victim_addr];
-                                    DPRINTF(FlexLLC, "Sync: Address = %#x \n", victim_addr);
-                                    trigger(Event:Sync, victim_addr, victim_entry, victim_tbe);
-                                } else {
-                                    DPRINTF(FlexLLC, "PutM_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                    trigger(Event:PutM_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
-                                }
                             } else {
-                                assert(false);
-                            }
-                        } else if (cacheMemory.getSharers(in_msg.addr).count() > 0) {
-                            // PutS
-                            if (cacheMemory.containLLCLine(in_msg.addr)) {
-                                // IN
-                                assert(getState(tbe, cache_entry, in_msg.addr) == State:S);
-                                if (cacheMemory.getIsDirty(in_msg.addr)) {
-                                    if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
-                                        DPRINTF(FlexLLC, "PutS_NotLastCopy: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                        trigger(Event:PutS_NotLastCopy, in_msg.addr, cache_entry, tbe);
-                                    } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
-                                        DPRINTF(FlexLLC, "PutS_LastCopy_Dirty: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                        trigger(Event:PutS_LastCopy_Dirty, in_msg.addr, cache_entry, tbe);
-                                    } else {
-                                        assert(false);
-                                    }
+                                // insert after replacement
+                                victim_addr := cacheMemory.cacheProbe(in_msg.addr);
+                                CacheEntry victim_entry := getCacheEntry(victim_addr);
+                                TBE victim_tbe := TBEs[victim_addr];
+                                assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
+                                if ((!victim_entry.dirty) || (victim_entry.stale)) {
+                                    // silent replacement
+                                    DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
+                                    trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
                                 } else {
-                                    if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
-                                        DPRINTF(FlexLLC, "PutS_NotLastCopy: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                        trigger(Event:PutS_NotLastCopy, in_msg.addr, cache_entry, tbe);
-                                    } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
-                                        DPRINTF(FlexLLC, "PutS_LastCopy_Clean: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                        trigger(Event:PutS_LastCopy_Clean, in_msg.addr, cache_entry, tbe);
-                                    } else {
-                                        assert(false);
-                                    }
+                                    // replacement with writeback
+                                    DPRINTF(FlexLLC, "Replacement_Writeback: Address = %#x \n", victim_addr);
+                                    trigger(Event:Replacement_Writeback, victim_addr, victim_entry, victim_tbe);
                                 }
-                            } else if (cacheMemory.containNILine(in_msg.addr)) {
-                                // NI
-                                assert(getState(tbe, cache_entry, in_msg.addr) == State:S_NI);
-                                if (cacheMemory.getIsDirty(in_msg.addr)) {
-                                    if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
-                                        if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
-                                            DPRINTF(FlexLLC, "PutS_NotLastCopy_NI_InsertToLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_NotLastCopy_NI_InsertToLLC, in_msg.addr, cache_entry, tbe);
-                                        } else if (cacheMemory.existLLCOnlyDirtyLinePerSet(in_msg.addr)) {
-                                            victim_addr := cacheMemory.getLRULLCOnlyDirtyLinePerSet(in_msg.addr);
-                                            CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                            TBE victim_tbe := TBEs[victim_addr];
-                                            DPRINTF(FlexLLC, "Sync: Address = %#x \n", victim_addr);
-                                            trigger(Event:Sync, victim_addr, victim_entry, victim_tbe);
-                                        } else {
-                                            DPRINTF(FlexLLC, "PutS_NotLastCopy_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_NotLastCopy_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
-                                        }
-                                    } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
-                                        if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
-                                            DPRINTF(FlexLLC, "PutS_LastCopy_Dirty_NI_InsertToLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_LastCopy_Dirty_NI_InsertToLLC, in_msg.addr, cache_entry, tbe);
-                                        } else if (cacheMemory.existLLCOnlyDirtyLinePerSet(in_msg.addr)) {
-                                            victim_addr := cacheMemory.getLRULLCOnlyDirtyLinePerSet(in_msg.addr);
-                                            CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                            TBE victim_tbe := TBEs[victim_addr];
-                                            DPRINTF(FlexLLC, "Sync: Address = %#x \n", victim_addr);
-                                            trigger(Event:Sync, victim_addr, victim_entry, victim_tbe);
-                                        } else {
-                                            DPRINTF(FlexLLC, "PutS_LastCopy_Dirty_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_LastCopy_Dirty_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
-                                        }
-                                    } else {
-                                        assert(false);
-                                    }
-                                } else {
-                                    if (cacheMemory.getSharers(in_msg.addr).count() > 1) {
-                                        if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
-                                            DPRINTF(FlexLLC, "PutS_NotLastCopy_NI_InsertToLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_NotLastCopy_NI_InsertToLLC, in_msg.addr, cache_entry, tbe);
-                                        } else if (cacheMemory.existLLCOnlyDirtyLinePerSet(in_msg.addr)) {
-                                            victim_addr := cacheMemory.getLRULLCOnlyDirtyLinePerSet(in_msg.addr);
-                                            CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                            TBE victim_tbe := TBEs[victim_addr];
-                                            DPRINTF(FlexLLC, "Sync: Address = %#x \n", victim_addr);
-                                            trigger(Event:Sync, victim_addr, victim_entry, victim_tbe);
-                                        } else {
-                                            DPRINTF(FlexLLC, "PutS_NotLastCopy_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_NotLastCopy_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
-                                        }
-                                    } else if (cacheMemory.getSharers(in_msg.addr).count() == 1) {
-                                        if (cacheMemory.existVacancyPerSet(in_msg.addr) || cacheMemory.existLLCOnlyCleanLinePerSet(in_msg.addr)) {
-                                            DPRINTF(FlexLLC, "PutS_LastCopy_Clean_NI_InsertToLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_LastCopy_Clean_NI_InsertToLLC, in_msg.addr, cache_entry, tbe);
-                                        } else if (cacheMemory.existLLCOnlyDirtyLinePerSet(in_msg.addr)) {
-                                            victim_addr := cacheMemory.getLRULLCOnlyDirtyLinePerSet(in_msg.addr);
-                                            CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                            TBE victim_tbe := TBEs[victim_addr];
-                                            DPRINTF(FlexLLC, "Sync: Address = %#x \n", victim_addr);
-                                            trigger(Event:Sync, victim_addr, victim_entry, victim_tbe);
-                                        } else {
-                                            DPRINTF(FlexLLC, "PutS_LastCopy_Clean_NI_BypassLLC: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                            trigger(Event:PutS_LastCopy_Clean_NI_BypassLLC, in_msg.addr, cache_entry, tbe);
-                                        }
-                                    } else {
-                                        assert(false);
-                                    }
-                                }
-                            } else {
-                                assert(false);
                             }
-                        } else {
-                            assert(false);
                         }
                     } else if (in_msg.type == CoherenceRequestType:Upg) {
-                        DPRINTF(FlexLLC, "Upg: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                        trigger(Event:Upg, in_msg.addr, cache_entry, tbe);
+                        DPRINTF(FlexLLC, "Upgrade: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:Upgrade, in_msg.addr, cache_entry, tbe);
                     } else {
-                        trigger(Event:DontCare_Request, in_msg.addr, cache_entry, tbe);
+                        trigger(Event:NOP, in_msg.addr, cache_entry, tbe);
                     }
                 }
             }
@@ -464,21 +365,18 @@ machine(MachineType:L2Cache, "LLC") :
 
     action(allocateCacheBlock, desc="Allocate a cache block") {
         assert(is_invalid(cache_entry));
-        if (!cacheMemory.existVacancyPerSet(address)) {
-            assert(cacheMemory.existLLCOnlyCleanLinePerSet(address));
-            Addr victim_address := cacheMemory.getLRULLCOnlyCleanLinePerSet(address);
-            DPRINTF(FlexLLC, "Deallocate: Address = %#x \n", victim_address);
-            cacheMemory.XYZDeallocate(victim_address);
-            setState(tbe, cache_entry, victim_address, State:InMem);
-        }
-        assert(cacheMemory.existVacancyPerSet(address));
-        DPRINTF(FlexLLC, "Allocate: Address = %#x \n", address);
-        set_cache_entry(cacheMemory.XYZAllocate(address, new CacheEntry));
+        assert(cacheMemory.cacheAvail(address));
+        set_cache_entry(cacheMemory.allocate(address, new CacheEntry));
+        CacheEntry entry := getCacheEntry(address);
+        assert(is_valid(entry));
+        entry.dirty := false;
+        entry.stale := false;
+        cacheMemory.setMRU(cache_entry);
     }
 
     action(deallocateCacheBlock, desc="Deallocate a cache block") {
         assert(is_valid(cache_entry));
-        cacheMemory.XYZDeallocate(address);
+        cacheMemory.deallocate(address);
         unset_cache_entry();
     }
 
@@ -520,7 +418,7 @@ machine(MachineType:L2Cache, "LLC") :
         }
     }
 
-    action(writebackFromL2, desc="Writeback data") {
+    action(writebackToMem, desc="Writeback data") {
         assert(is_valid(cache_entry));
         Entry dir_entry := getDirectoryEntry(address);
         dir_entry.memWriteIssueTime := curCycle();
@@ -532,31 +430,6 @@ machine(MachineType:L2Cache, "LLC") :
             out_msg.DataBlk := cache_entry.dataBlk;
             out_msg.Len := 0;
             out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
-        }
-    }
-
-    action(writebackFromL1, desc="Writeback data") {
-        peek(requestInPort, RequestMsg) {
-            assert(in_msg.type == CoherenceRequestType:Put);
-            Entry dir_entry := getDirectoryEntry(address);
-            dir_entry.memWriteIssueTime := curCycle();
-            dir_entry.from_addr := in_msg.addr;
-            dir_entry.reqID := in_msg.reqID;
-            dir_entry.requestor := in_msg.requestor;
-            Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
-            from_dir_entry.writeback_triggered := true;
-
-            enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
-                out_msg.addr := address;
-                out_msg.Type := MemoryRequestType:MEMORY_WB;
-                out_msg.Sender := in_msg.requestor;
-                out_msg.MessageSize := MessageSizeType:Writeback_Data;
-                out_msg.DataBlk := in_msg.dataBlk;
-                out_msg.Len := 0;
-                out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
-            }
-
-            DPRINTF(FlexLLC, "writebackFromL1: Address = %#x, Current State = %s, Sender = %s \n", address, getDirectoryEntry(address).state, in_msg.requestor);
         }
     }
 
@@ -628,7 +501,7 @@ machine(MachineType:L2Cache, "LLC") :
         }
     }
 
-    action(forwardMemResponse, desc="Forward memory data response") {
+    action(forwardMemResponse, desc="Forward memory data response") { // todo: for GetS, add requestor when receiving Get request during transient state waiting for data
         Entry dir_entry := getDirectoryEntry(address);
         peek(responseFromDirInPort, DirectoryMsg) {
             enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
@@ -681,76 +554,46 @@ machine(MachineType:L2Cache, "LLC") :
         profiler.profileMemLatency(curCycle() - dir_entry.memReadIssueTime);
     }
 
-    // xyz actions
+    // metadata actions
 
-    action(xyzAddSharer, desc="") {
-        peek(requestInPort, RequestMsg) {
-            cacheMemory.addSharer(in_msg.addr, in_msg.requestor, true);        
-        }
+    action(setDirty, desc="") {
+        assert(is_valid(cache_entry));
+        cache_entry.dirty := true;
     }
 
-    action(xyzRemoveSharer, desc="") {
-        peek(requestInPort, RequestMsg) {
-            cacheMemory.removeSharer(in_msg.addr, in_msg.requestor);
-        }
+    action(setClean, desc="") {
+        assert(is_valid(cache_entry));
+        cache_entry.dirty := false;
     }
 
-    action(xyzClearSharers, desc="") {
-        peek(requestInPort, RequestMsg) {
-            cacheMemory.clearSharers(in_msg.addr);
-        }
+    action(assertDirty, desc="") {
+        assert(is_valid(cache_entry));
+        assert(cache_entry.dirty == true);
     }
 
-    action(xyzAddOwner, desc="") {
-        peek(requestInPort, RequestMsg) {
-            cacheMemory.addOwner(in_msg.addr, in_msg.requestor, true);
-        }
+    action(assertClean, desc="") {
+        assert(is_valid(cache_entry));
+        assert(cache_entry.dirty == false);
     }
 
-    action(xyzClearOwner, desc="") {
-        peek(requestInPort, RequestMsg) {
-            cacheMemory.clearOwner(in_msg.addr);
-        }
+    action(setStale, desc="") {
+        assert(is_valid(cache_entry));
+        cache_entry.stale := true;
     }
 
-    action(xyzConvertOwnerToSharer, desc="") {
-        peek(requestInPort, RequestMsg) {
-            if (cacheMemory.containLLCLine(in_msg.addr)) {
-                cacheMemory.convertOwnerToSharer(in_msg.addr, true);
-            } else if (cacheMemory.containNILine(in_msg.addr)) {
-                cacheMemory.convertOwnerToSharer(in_msg.addr, false);
-            } else {
-                assert(false);
-            }
-        }
+    action(setUpToDate, desc="") {
+        assert(is_valid(cache_entry));
+        cache_entry.stale := false;
     }
 
-    action(xyzSetIsDirty, desc="") {
-        cacheMemory.setIsDirty(address);
+    action(assertStale, desc="") {
+        assert(is_valid(cache_entry));
+        assert(cache_entry.stale == true);
     }
 
-    action(xyzUnsetIsDirty, desc="") {
-        cacheMemory.unSetIsDirty(address);
-    }
-
-    action(xyzConvertNILineToIN, desc="") {
-        cacheMemory.convertNILineToIN(address);
-    }
-
-    action(xyzAddSharerNI, desc="") {
-        peek(requestInPort, RequestMsg) {
-            cacheMemory.addSharer(in_msg.addr, in_msg.requestor, false);        
-        }
-    }
-
-    action(xyzAddOwnerNI, desc="") {
-        peek(requestInPort, RequestMsg) {
-            cacheMemory.addOwner(in_msg.addr, in_msg.requestor, false);
-        }
-    }
-    
-    action(xyzDeallocateMetadataNI, desc="") {
-        cacheMemory.removeLineFromNIDirectory(address);
+    action(assertUpToDate, desc="") {
+        assert(is_valid(cache_entry));
+        assert(cache_entry.stale == false);
     }
 
     action(stallAndWaitRequestQueue, desc="...") {
@@ -765,37 +608,15 @@ machine(MachineType:L2Cache, "LLC") :
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
 
-    // transactions from InMem
+    // transactions from invalid states
 
-    transition(InMem, GetS, I_to_S_await_mem_data) {BankAccess, MemAccess} {
+    transition(I, GetS, I_to_MAPC_await_data) {BankAccess, MemAccess} {
         allocateCacheBlock;
         sendMemRead;
-        xyzAddSharer;
         popRequestQueue;
     }
 
-    transition(InMem, GetM, I_to_M_await_mem_data) {BankAccess, MemAccess} {
-        allocateCacheBlock;
-        sendMemRead;
-        xyzAddOwner;
-        xyzSetIsDirty;
-        popRequestQueue;
-    }
-
-    transition(InMem, GetS_NI, I_to_S_await_mem_data_NI) {BankAccess, MemAccess} {
-        sendMemRead;
-        xyzAddSharerNI;
-        popRequestQueue;
-    }
-
-    transition(InMem, GetM_NI, I_to_M_await_mem_data_NI) {BankAccess, MemAccess} {
-        sendMemRead;
-        xyzAddOwnerNI;
-        xyzSetIsDirty;
-        popRequestQueue;
-    }
-
-    transition(I_to_S_await_mem_data, Mem_Response, S) {BankAccess} {
+    transition(I_to_MAPC_await_data, Mem_Response, May_Be_Privately_Cached) {BankAccess} {
         decrementOutstandingMemRequest;
         writeMemResponseToCache;
         forwardMemResponse;
@@ -804,7 +625,15 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I_to_M_await_mem_data, Mem_Response, M) {BankAccess} {
+    transition(I, GetM, I_to_PC_await_data) {BankAccess, MemAccess} {
+        allocateCacheBlock;
+        setDirty;
+        setStale;
+        sendMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_PC_await_data, Mem_Response, Must_Be_Privately_Cached) {BankAccess} {
         decrementOutstandingMemRequest;
         writeMemResponseToCache;
         forwardMemResponse;
@@ -813,7 +642,12 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I_to_S_await_mem_data_NI, Mem_Response, S_NI) {
+    transition(I, GetS_NI, I_to_I_await_data) {MemAccess} {
+        sendMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_I_await_data, Mem_Response, I) {
         decrementOutstandingMemRequest;
         forwardMemResponse;
         profileMemReadLatency;
@@ -821,7 +655,12 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I_to_M_await_mem_data_NI, Mem_Response, M_NI) {
+    transition(I, GetM_NI, I_to_IPC_await_data) {MemAccess} {
+        sendMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_IPC_await_data, Mem_Response, I_Must_Be_Privately_Cached) {
         decrementOutstandingMemRequest;
         forwardMemResponse;
         profileMemReadLatency;
@@ -829,214 +668,133 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    // transitions from LOC & LOD
-
-    transition(LOD, Sync, LOD_to_LOC_await_ack_await_allocation) {MemAccess} {
-        xyzUnsetIsDirty;
-        writebackFromL2;
+    transition(I, Upgrade, I_Must_Be_Privately_Cached) {
+        popRequestQueue;
     }
 
-    transition(LOD_to_LOC_await_ack_await_allocation, Mem_Ack, LOC) {
+    transition(I_to_I_await_data, Upgrade, I_to_IPC_await_data) {
+        popRequestQueue;
+    }
+
+    transition(I_Must_Be_Privately_Cached, {GetS, GetS_NI, GetM, GetM_NI}) {
+        popRequestQueue;
+    }
+
+    transition(I_Must_Be_Privately_Cached, PutM, Must_Be_LLC_Only) {
+        allocateCacheBlock;
+        setDirty;
+        setUpToDate;
+        writeDataToCache;
+        sendAck;
+        popRequestQueue;
+    }
+
+    // transitions from Must_Be_LLC_Only
+
+    transition(Must_Be_LLC_Only, GetS, May_Be_Privately_Cached) {BankAccess} {
+        assertDirty;
+        assertUpToDate;
+        sendData;
+        popRequestQueue;
+    }
+
+    transition(Must_Be_LLC_Only, GetM, Must_Be_Privately_Cached) {BankAccess} {
+        assertDirty;
+        assertUpToDate;
+        setStale;
+        sendData;
+        popRequestQueue;
+    }
+
+    transition(Must_Be_LLC_Only, Replacement_Writeback, LO_to_I_await_ack) {BankAccess, MemAccess} {
+        assertDirty;
+        assertUpToDate;
+        setClean;
+        writebackToMem;
+        deallocateCacheBlock;
+    }
+
+    transition(LO_to_I_await_ack, Mem_Ack, I) {BankAccess} {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
         popMemResponseQueue;
         wakeUpAllQueues;
     }
 
-    transition({LOC, LOD}, GetS, S) {BankAccess} {
-        xyzAddSharer;
+
+    // transitions from May_Be_Privately_Cached
+
+    transition(May_Be_Privately_Cached, GetS) {BankAccess} {
+        assertUpToDate;
         sendData;
         popRequestQueue;
     }
 
-    transition({LOC, LOD}, GetM, M) {BankAccess} {
-        xyzAddOwner;
-        xyzSetIsDirty;
+    transition(May_Be_Privately_Cached, GetM, Must_Be_Privately_Cached) {BankAccess} {
+        assertUpToDate;
+        setDirty;
+        setStale;
         sendData;
         popRequestQueue;
     }
 
-    // transitions from S
-
-    transition({S, I_to_S_await_mem_data}, GetS) {
-        xyzAddSharer;
+    transition(May_Be_Privately_Cached, Upgrade, Must_Be_Privately_Cached) {BankAccess} {
+        assertUpToDate;
+        setDirty;
+        setStale;
         popRequestQueue;
     }
 
-    transition(S, Upg, M) {
-        xyzClearSharers;
-        xyzAddOwner;
-        xyzSetIsDirty;
-        popRequestQueue;
+    transition(May_Be_Privately_Cached, Replacement_Silent, I) {BankAccess} {
+        assertClean;
+        assertUpToDate;
+        deallocateCacheBlock;
     }
 
-    transition(S, GetM, M) {
-        xyzClearSharers;
-        xyzAddOwner;
-        xyzSetIsDirty;
-        popRequestQueue;
+    transition(May_Be_Privately_Cached, Replacement_Writeback, MBPC_to_I_await_ack) {BankAccess, MemAccess} {
+        assertDirty;
+        assertUpToDate;
+        setClean;
+        writebackToMem;
+        deallocateCacheBlock;
     }
 
-    transition(I_to_S_await_mem_data, GetM, I_to_M_await_mem_data) {
-        xyzClearSharers;
-        xyzAddOwner;
-        xyzSetIsDirty;
-        popRequestQueue;
-    }
-
-    transition(S, PutS_NotLastCopy) {
-        xyzRemoveSharer;
-        sendAck;
-        popRequestQueue;
-    }
-
-    transition(S, PutS_LastCopy_Clean, LOC) {
-        xyzClearSharers;
-        sendAck;
-        popRequestQueue;
-    }
-
-    transition(S, PutS_LastCopy_Dirty, LOD) {
-        xyzClearSharers;
-        sendAck;
-        popRequestQueue;
-    }
-
-    // transitions from M
-
-    transition({M, I_to_M_await_mem_data}, GetS) {
-        xyzClearOwner;
-        xyzAddOwner;
-        popRequestQueue;
-    }
-
-    transition({M, I_to_M_await_mem_data}, GetM) {
-        xyzClearOwner;
-        xyzAddOwner;
-        popRequestQueue;
-    }
-
-    transition(M, PutM, LOD) {BankAccess} {
-        xyzClearOwner;
-        writeDataToCache;
-        sendAck;
-        popRequestQueue;
-    }
-
-    // transitions from S_NI
-
-    transition({S_NI, I_to_S_await_mem_data_NI}, GetS_NI) {
-        xyzAddSharerNI;
-        popRequestQueue;
-    }
-
-    transition(S_NI, Upg, M_NI) {
-        xyzClearSharers;
-        xyzAddOwnerNI;
-        xyzSetIsDirty;
-        popRequestQueue;
-    }
-
-    transition(S_NI, GetM_NI, M_NI) {
-        xyzClearSharers;
-        xyzAddOwnerNI;
-        xyzSetIsDirty;
-        popRequestQueue;
-    }
-
-    transition(I_to_S_await_mem_data_NI, GetM_NI, I_to_M_await_mem_data_NI) {
-        xyzClearSharers;
-        xyzAddOwnerNI;
-        xyzSetIsDirty;
-        popRequestQueue;
-    }
-
-    transition(S_NI, PutS_NotLastCopy_NI_BypassLLC) {
-        xyzRemoveSharer;
-        sendAck;
-        popRequestQueue;
-    }
-
-    transition(S_NI, PutS_NotLastCopy_NI_InsertToLLC, S) {BankAccess} {
-        xyzRemoveSharer;
-        sendAck;
-        allocateCacheBlock;
-        writeDataToCache;
-        xyzConvertNILineToIN;
-        popRequestQueue;
-    }
-
-    transition(S_NI, PutS_LastCopy_Clean_NI_BypassLLC, InMem) {
-        xyzClearSharers;
-        sendAck;
-        xyzDeallocateMetadataNI;
-        popRequestQueue;
-    }
-
-    transition(S_NI, PutS_LastCopy_Clean_NI_InsertToLLC, LOC) {BankAccess} {
-        xyzClearSharers;
-        sendAck;
-        allocateCacheBlock;
-        writeDataToCache;
-        xyzConvertNILineToIN;
-        popRequestQueue;
-    }
-
-    transition(S_NI, PutS_LastCopy_Dirty_NI_BypassLLC, DirtyNI_to_I_await_ack) {MemAccess} {
-        xyzClearSharers;
-        writebackFromL1;
-        popRequestQueue;
-    }
-
-    transition(S_NI, PutS_LastCopy_Dirty_NI_InsertToLLC, LOD) {BankAccess} {
-        xyzClearSharers;
-        sendAck;
-        allocateCacheBlock;
-        writeDataToCache;
-        xyzConvertNILineToIN;
-        popRequestQueue;
-    }
-
-    // transitions from M_NI
-
-    transition({M_NI, I_to_M_await_mem_data_NI}, GetS_NI) {
-        xyzClearOwner;
-        xyzAddOwnerNI;
-        popRequestQueue;
-    }
-
-    transition({M_NI, I_to_M_await_mem_data_NI}, GetM_NI) {
-        xyzClearOwner;
-        xyzAddOwnerNI;
-        popRequestQueue;
-    }
-
-    transition(M_NI, PutM_NI_BypassLLC, DirtyNI_to_I_await_ack) {MemAccess} {
-        xyzClearOwner;
-        writebackFromL1;
-        popRequestQueue;
-    }
-
-    transition(M_NI, PutM_NI_InsertToLLC, LOD) {BankAccess} {
-        xyzClearOwner;
-        sendAck;
-        allocateCacheBlock;
-        writeDataToCache;
-        xyzConvertNILineToIN;
-        popRequestQueue;
-    }
-
-    // transitions from DirtyNI_to_I_await_ack
-    transition(DirtyNI_to_I_await_ack, Mem_Ack, InMem) {
+    transition(MBPC_to_I_await_ack, Mem_Ack, I) {BankAccess} {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
-        forwardAck;
-        xyzDeallocateMetadataNI;
         popMemResponseQueue;
         wakeUpAllQueues;
     }
 
-    transition(DirtyNI_to_I_await_ack, {GetS, GetM, GetS_NI, GetM_NI}) {MemAccess} {
+
+    // transitions from Must_Be_Privately_Cached
+
+    transition(Must_Be_Privately_Cached, {GetS, GetM}) {
+        popRequestQueue;
+    }
+
+    transition(Must_Be_Privately_Cached, PutM, Must_Be_LLC_Only) {BankAccess} {
+        assertDirty;
+        assertStale;
+        setUpToDate;
+        writeDataToCache;
+        sendAck;
+        popRequestQueue;
+    }
+
+    transition(Must_Be_Privately_Cached, Replacement_Silent, I_Must_Be_Privately_Cached) {BankAccess} {
+        assertDirty;
+        assertStale;
+        deallocateCacheBlock;
+    }
+
+    // stall
+
+    transition({I_to_MAPC_await_data, I_to_PC_await_data}, {Replacement_Silent, Replacement_Writeback}) {
         stallAndWaitRequestQueue;
+    }
+
+    transition({I_to_MAPC_await_data, I_to_PC_await_data,I_to_I_await_data, I_to_IPC_await_data}, {GetS, GetS_NI, GetM, GetM_NI}) {
+        popRequestQueue;
     }
 }

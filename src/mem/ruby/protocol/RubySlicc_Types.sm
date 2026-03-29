@@ -197,6 +197,9 @@ structure (DirectoryMemory, external = "yes") {
 structure (CacheMemory, external = "yes") {
   bool cacheAvail(Addr);
   Addr cacheProbe(Addr);
+  Addr cacheProbe_clean_or_stale(Addr);
+  bool clean_or_stale_avail(Addr);
+
   AbstractCacheEntry getNullEntry();
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry);
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry, bool);
@@ -224,35 +227,6 @@ structure (CacheMemory, external = "yes") {
   void profileDemandMiss();
   void profilePrefetchHit();
   void profilePrefetchMiss();
-
-  AbstractCacheEntry XYZAllocate(Addr, AbstractCacheEntry);
-  void XYZDeallocate(Addr);
-
-  NetDest getOwner(Addr);
-  NetDest getASharer(Addr);
-  NetDest getSharers(Addr);
-  void addSharer(Addr, MachineID, bool);
-  void removeSharer(Addr, MachineID);
-  void clearSharers(Addr);
-  void addOwner(Addr, MachineID, bool);
-  void clearOwner(Addr);
-  void convertOwnerToSharer(Addr, bool);
-  
-  void setIsDirty(Addr);
-  void unSetIsDirty(Addr);
-  bool getIsDirty(Addr);
-  bool containLLCLine(Addr);
-  bool containNILine(Addr);
-  bool existVacancyPerSet(Addr);
-  bool existLLCOnlyCleanLinePerSet(Addr);
-  bool existLLCOnlyDirtyLinePerSet(Addr address);
-  Addr getLRULLCOnlyCleanLinePerSet(Addr);
-  Addr getLRULLCOnlyDirtyLinePerSet(Addr);
-
-  int getNIState(Addr);
-  void setNITransientState(Addr, int);
-  void removeLineFromNIDirectory(Addr);
-  void convertNILineToIN(Addr);
 }
 
 structure (WireBuffer, inport="yes", outport="yes", external = "yes") {

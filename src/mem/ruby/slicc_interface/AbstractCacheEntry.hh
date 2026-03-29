@@ -122,6 +122,10 @@ class AbstractCacheEntry : public ReplaceableEntry
     bool getInHtmWriteSet() const;
     virtual void invalidateEntry() {}
 
+    // to be overridden
+    virtual bool getDirty() { return false; }
+    virtual bool getStale() { return false; }
+
   private:
     // hardware transactional memory
     bool m_htmInReadSet;
