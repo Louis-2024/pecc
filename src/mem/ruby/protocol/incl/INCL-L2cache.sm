@@ -28,8 +28,6 @@ machine(MachineType:L2Cache, "LLC") :
     // Profiler
     CustomProfiler *profiler;
 
-    Addr victim_addr := 0;
-    Addr zero_addr := 0;
 {
 
     ////////////////////////////////////////////////////////////////////////////
@@ -248,109 +246,95 @@ machine(MachineType:L2Cache, "LLC") :
         }
     }
 
-    in_port(responseInPort, ResponseMsg, responseIn) {
-        // Response port is not really in use right now
-        if (responseInPort.isReady(clockEdge())) {
-            peek(responseInPort, ResponseMsg) {
-                error("Unexpected data response message");
-            }
-        }
-    }
-
     in_port(requestInPort, RequestMsg, requestIn) {
         if (requestInPort.isReady(clockEdge())) {
             peek(requestInPort, RequestMsg) {
                 DPRINTF(RubySlicc, "Request port: see input message %s\n", in_msg);
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
-
-                if ((victim_addr != zero_addr) && ((getState(TBEs[victim_addr], getCacheEntry(victim_addr), victim_addr) == State:MBPC_to_I_await_ack) || (getState(TBEs[victim_addr], getCacheEntry(victim_addr), victim_addr) == State:LO_to_I_await_ack))) {
-                    stall_and_wait(requestInPort, victim_addr);
-                } else {
-                    if (in_msg.type == CoherenceRequestType:GetS) {
-                        // GetS
-                        if (cacheMemory.isTagPresent(in_msg.addr)) {
+                if (in_msg.type == CoherenceRequestType:GetS) {
+                    // GetS
+                    if (cacheMemory.isTagPresent(in_msg.addr)) {
+                        DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
+                    } else {
+                        // if there exists vac, fetch as IN
+                        if(cacheMemory.cacheAvail(in_msg.addr)) {
                             DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                             trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
+                        } else if (cacheMemory.clean_or_stale_avail(in_msg.addr)) {
+                            // if there exist clean / stale lines lines, fetch as IN after silent replacement
+                            Addr victim_addr := cacheMemory.cacheProbe_clean_or_stale(in_msg.addr);
+                            CacheEntry victim_entry := getCacheEntry(victim_addr);
+                            TBE victim_tbe := TBEs[victim_addr];
+                            assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
+                            assert((!victim_entry.dirty) || (victim_entry.stale));
+                            DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
+                            trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
                         } else {
-                            // if there exists vac, fetch as IN
-                            if(cacheMemory.cacheAvail(in_msg.addr)) {
-                                DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
-                            } else if (cacheMemory.clean_or_stale_avail(in_msg.addr)) {
-                                // if there exist clean / stale lines lines, fetch as IN after silent replacement
-                                victim_addr := cacheMemory.cacheProbe_clean_or_stale(in_msg.addr);
-                                CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                TBE victim_tbe := TBEs[victim_addr];
-                                assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
-                                assert((!victim_entry.dirty) || (victim_entry.stale));
-                                DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
-                                trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
-                            } else {
-                                DPRINTF(FlexLLC, "GetS_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                trigger(Event:GetS_NI, in_msg.addr, cache_entry, tbe);
-                            }
+                            DPRINTF(FlexLLC, "GetS_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:GetS_NI, in_msg.addr, cache_entry, tbe);
                         }
-                    } else if (in_msg.type == CoherenceRequestType:GetM) {
-                        // GetM
-                        if (cacheMemory.isTagPresent(in_msg.addr)) {
+                    }
+                } else if (in_msg.type == CoherenceRequestType:GetM) {
+                    // GetM
+                    if (cacheMemory.isTagPresent(in_msg.addr)) {
+                        DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
+                    } else {
+                        // if there exists vac, fetch as IN
+                        if(cacheMemory.cacheAvail(in_msg.addr)) {
                             DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                             trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
+                        } else if (cacheMemory.clean_or_stale_avail(in_msg.addr)) {
+                            // if there exist clean / stale lines lines, fetch as IN after silent replacement
+                            Addr victim_addr := cacheMemory.cacheProbe_clean_or_stale(in_msg.addr);
+                            CacheEntry victim_entry := getCacheEntry(victim_addr);
+                            TBE victim_tbe := TBEs[victim_addr];
+                            assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
+                            assert((!victim_entry.dirty) || (victim_entry.stale));
+                            DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
+                            trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
                         } else {
-                            // if there exists vac, fetch as IN
-                            if(cacheMemory.cacheAvail(in_msg.addr)) {
-                                DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
-                            } else if (cacheMemory.clean_or_stale_avail(in_msg.addr)) {
-                                // if there exist clean / stale lines lines, fetch as IN after silent replacement
-                                victim_addr := cacheMemory.cacheProbe_clean_or_stale(in_msg.addr);
-                                CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                TBE victim_tbe := TBEs[victim_addr];
-                                assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
-                                assert((!victim_entry.dirty) || (victim_entry.stale));
-                                DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
-                                trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
-                            } else {
-                                DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
-                            }
+                            DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
                         }
-                    } else if (in_msg.type == CoherenceRequestType:Put) {
-                        // PutM
-                        if (cacheMemory.isTagPresent(in_msg.addr)) {
-                            assert(getState(tbe, cache_entry, in_msg.addr) == State:Must_Be_Privately_Cached);
+                    }
+                } else if (in_msg.type == CoherenceRequestType:Put) {
+                    // PutM
+                    if (cacheMemory.isTagPresent(in_msg.addr)) {
+                        assert(getState(tbe, cache_entry, in_msg.addr) == State:Must_Be_Privately_Cached);
+                        DPRINTF(FlexLLC, "PutM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:PutM, in_msg.addr, cache_entry, tbe);
+                    } else {
+                        // NI
+                        assert(getState(tbe, cache_entry, in_msg.addr) == State:I_Must_Be_Privately_Cached);
+                        if (cacheMemory.cacheAvail(in_msg.addr)) {
+                            // if there exists vac, insert directly
                             DPRINTF(FlexLLC, "PutM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                             trigger(Event:PutM, in_msg.addr, cache_entry, tbe);
                         } else {
-                            // NI
-                            assert(getState(tbe, cache_entry, in_msg.addr) == State:I_Must_Be_Privately_Cached);
-                            if (cacheMemory.cacheAvail(in_msg.addr)) {
-                                // if there exists vac, insert directly
-                                DPRINTF(FlexLLC, "PutM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                trigger(Event:PutM, in_msg.addr, cache_entry, tbe);
+                            // insert after replacement
+                            Addr victim_addr := cacheMemory.cacheProbe(in_msg.addr);
+                            CacheEntry victim_entry := getCacheEntry(victim_addr);
+                            TBE victim_tbe := TBEs[victim_addr];
+                            assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
+                            if ((!victim_entry.dirty) || (victim_entry.stale)) {
+                                // silent replacement
+                                DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
+                                trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
                             } else {
-                                // insert after replacement
-                                victim_addr := cacheMemory.cacheProbe(in_msg.addr);
-                                CacheEntry victim_entry := getCacheEntry(victim_addr);
-                                TBE victim_tbe := TBEs[victim_addr];
-                                assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
-                                if ((!victim_entry.dirty) || (victim_entry.stale)) {
-                                    // silent replacement
-                                    DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
-                                    trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
-                                } else {
-                                    // replacement with writeback
-                                    DPRINTF(FlexLLC, "Replacement_Writeback: Address = %#x \n", victim_addr);
-                                    trigger(Event:Replacement_Writeback, victim_addr, victim_entry, victim_tbe);
-                                }
+                                // replacement with writeback
+                                DPRINTF(FlexLLC, "Replacement_Writeback: Address = %#x \n", victim_addr);
+                                trigger(Event:Replacement_Writeback, victim_addr, victim_entry, victim_tbe);
                             }
                         }
-                    } else if (in_msg.type == CoherenceRequestType:Upg) {
-                        DPRINTF(FlexLLC, "Upgrade: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                        trigger(Event:Upgrade, in_msg.addr, cache_entry, tbe);
-                    } else {
-                        trigger(Event:NOP, in_msg.addr, cache_entry, tbe);
                     }
+                } else if (in_msg.type == CoherenceRequestType:Upg) {
+                    DPRINTF(FlexLLC, "Upgrade: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                    trigger(Event:Upgrade, in_msg.addr, cache_entry, tbe);
+                } else {
+                    trigger(Event:NOP, in_msg.addr, cache_entry, tbe);
                 }
             }
         }
@@ -531,10 +515,6 @@ machine(MachineType:L2Cache, "LLC") :
         responseFromDirInPort.dequeue(clockEdge());
     }
 
-    action(popResponseQueue, desc="Pop the response queue") {
-        responseInPort.dequeue(clockEdge());
-    }
-
     action(popRequestQueue, desc="Pop the request queue") {
         requestInPort.dequeue(clockEdge());
     }
@@ -617,7 +597,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transactions from invalid states
 
-    transition(I, GetS, I_to_MBPC_await_data) {BankAccess, MemAccess} {
+    transition({I, MBPC_to_I_await_ack, LO_to_I_await_ack}, GetS, I_to_MBPC_await_data) {BankAccess, MemAccess} {
         allocateCacheBlock;
         sendMemRead;
         popRequestQueue;
@@ -633,7 +613,7 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I, GetM, I_to_PC_await_data) {BankAccess, MemAccess} {
+    transition({I, MBPC_to_I_await_ack, LO_to_I_await_ack}, GetM, I_to_PC_await_data) {BankAccess, MemAccess} {
         allocateCacheBlock;
         setDirty;
         setStale;
@@ -651,7 +631,7 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I, GetS_NI, I_to_I_await_data) {MemAccess} {
+    transition({I, MBPC_to_I_await_ack, LO_to_I_await_ack}, GetS_NI, I_to_I_await_data) {MemAccess} {
         sendMemRead;
         popRequestQueue;
     }
@@ -665,7 +645,7 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(I, GetM_NI, I_to_IPC_await_data) {MemAccess} {
+    transition({I, MBPC_to_I_await_ack, LO_to_I_await_ack}, GetM_NI, I_to_IPC_await_data) {MemAccess} {
         sendMemRead;
         popRequestQueue;
     }
@@ -732,6 +712,12 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
+    transition({I_to_MBPC_await_data, I_to_PC_await_data, I_to_I_await_data, I_to_IPC_await_data}, Mem_Ack) {
+        decrementOutstandingMemRequest;
+        profileMemWriteLatency;
+        popMemResponseQueue;
+        wakeUpAllQueues;
+    }
 
     // transitions from May_Be_Privately_Cached
 
@@ -807,13 +793,29 @@ machine(MachineType:L2Cache, "LLC") :
 
     // I_to_MBPC_await_data
 
-    transition(I_to_MBPC_await_data, {GetS, GetS_NI, GetM, GetM_NI}) {
+    transition(I_to_MBPC_await_data, {GetS, GetS_NI}) {
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_MBPC_await_data, {GetM, GetM_NI}) {
         stallAndWaitRequestQueue;
     }
 
     // I_to_I_await_data
 
-    transition(I_to_I_await_data, {GetS, GetS_NI, GetM, GetM_NI}) {
+    transition(I_to_I_await_data, GetS, I_to_MBPC_await_data) {
+        allocateCacheBlock;
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_I_await_data, GetS_NI) {
+        addRequestorToMemRead;
+        popRequestQueue;
+    }
+
+    transition(I_to_I_await_data, {GetM, GetM_NI}) {
         stallAndWaitRequestQueue;
     }
 
