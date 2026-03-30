@@ -213,17 +213,11 @@ def create_system(
 
         # Connect directory controller and the network
         # in ports
-        l2_cntrl.busGrantIn = MessageBuffer(ordered=True)
-        l2_cntrl.busGrantIn.in_port = ruby_system.network.out_port
         l2_cntrl.requestIn = MessageBuffer(ordered=True)
         l2_cntrl.requestIn.in_port = ruby_system.network.out_port
         l2_cntrl.responseIn = MessageBuffer(ordered=True)
         l2_cntrl.responseIn.in_port = ruby_system.network.out_port
         # out ports
-        l2_cntrl.busRequestOut = MessageBuffer(ordered=True)
-        l2_cntrl.busRequestOut.out_port = ruby_system.network.in_port
-        l2_cntrl.requestOut = MessageBuffer(ordered=True)
-        l2_cntrl.requestOut.out_port = ruby_system.network.in_port
         l2_cntrl.responseOut = MessageBuffer(ordered=False)
         l2_cntrl.responseOut.out_port = ruby_system.network.in_port
         # memory connection

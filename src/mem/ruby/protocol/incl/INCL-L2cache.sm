@@ -735,13 +735,13 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from May_Be_Privately_Cached
 
-    transition(May_Be_Privately_Cached, GetS) {BankAccess} {
+    transition(May_Be_Privately_Cached, {GetS, GetS_NI}) {BankAccess} {
         assertUpToDate;
         sendData;
         popRequestQueue;
     }
 
-    transition(May_Be_Privately_Cached, GetM, Must_Be_Privately_Cached) {BankAccess} {
+    transition(May_Be_Privately_Cached, {GetM, GetM_NI}, Must_Be_Privately_Cached) {BankAccess} {
         assertUpToDate;
         setDirty;
         setStale;
@@ -807,41 +807,14 @@ machine(MachineType:L2Cache, "LLC") :
 
     // I_to_MBPC_await_data
 
-    transition(I_to_MBPC_await_data, {GetS, GetS_NI}) {
-        addRequestorToMemRead;
-        popRequestQueue;
-    }
-
-    transition(I_to_MBPC_await_data, {GetM, GetM_NI}, I_to_PC_await_data) {
-        setDirty;
-        setStale;
-        addRequestorToMemRead;
-        popRequestQueue;
+    transition(I_to_MBPC_await_data, {GetS, GetS_NI, GetM, GetM_NI}) {
+        stallAndWaitRequestQueue;
     }
 
     // I_to_I_await_data
 
-    transition(I_to_I_await_data, GetS_NI) {
-        addRequestorToMemRead;
-        popRequestQueue;
-    }
-
-    transition(I_to_I_await_data, GetM_NI, I_to_IPC_await_data) {
-        addRequestorToMemRead;
-        popRequestQueue;
-    }
-
-    transition(I_to_I_await_data, GetS, I_to_MBPC_await_data) {
-        allocateCacheBlock;
-        addRequestorToMemRead;
-        popRequestQueue;
-    }
-
-    transition(I_to_I_await_data, GetM, I_to_PC_await_data) {
-        allocateCacheBlock;
-        setDirty;
-        setStale;
-        popRequestQueue;
+    transition(I_to_I_await_data, {GetS, GetS_NI, GetM, GetM_NI}) {
+        stallAndWaitRequestQueue;
     }
 
     // I_to_PC_await_data
