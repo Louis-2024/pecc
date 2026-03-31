@@ -24,32 +24,32 @@ def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB"
         wkdir=f"{splash3_dir}/kernels/cholesky"
     elif program == 'radix':
         binary=f"{splash3_dir}/kernels/radix/RADIX"
-        options=f"-p{ncore} -n524288 -r256"
+        options=f"-p{ncore} -n2097152"
         stdin=""
         wkdir=f"{splash3_dir}/kernels/radix"
     elif program == 'fft':
         binary=f"{splash3_dir}/kernels/fft/FFT"
-        options=f"-p{ncore} -m20 -n20 -l4"
+        options=f"-p{ncore} -m20 -l6 -n16384"
         stdin=""
         wkdir=f"{splash3_dir}/kernels/fft"
     elif program == 'lu_contiguous':
         binary=f"{splash3_dir}/kernels/lu/contiguous_blocks/LU"
-        options=f"-p{ncore} -n512 -b16"
+        options=f"-p{ncore} -n768"
         stdin=""
         wkdir=f"{splash3_dir}/kernels/lu/contiguous_blocks"
     elif program == 'lu_non_contig':
         binary=f"{splash3_dir}/kernels/lu/non_contiguous_blocks/LU"
-        options=f"-p{ncore} -n512 -b16"
+        options=f"-p{ncore} -n768"
         stdin=""
         wkdir=f"{splash3_dir}/kernels/lu/non_contiguous_blocks"
     elif program == 'ocean_contiguous':
         binary=f"{splash3_dir}/apps/ocean/contiguous_partitions/OCEAN"
-        options=f"-p{ncore} -n130"
+        options=f"-p{ncore} -n258"
         stdin=""
         wkdir=f"{splash3_dir}/apps/ocean/contiguous_partitions"
     elif program == 'ocean_non_contig':
         binary=f"{splash3_dir}/apps/ocean/non_contiguous_partitions/OCEAN"
-        options=f"-p{ncore} -n130"
+        options=f"-p{ncore} -n258"
         stdin=""
         wkdir=f"{splash3_dir}/apps/ocean/non_contiguous_partitions"
     elif program == 'raytrace':

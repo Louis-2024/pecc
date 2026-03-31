@@ -709,6 +709,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
             if (in_msg.owned) {
                 cache_entry.owned := true;
             }
+            if (in_msg.invalidate) {
+                tbe.to_I := true;
+            }
         }
     }
 
@@ -753,11 +756,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
             assert(is_valid(cache_entry));
             int num_requestors := tbe.requestors.count();
             if (cache_entry.owned && (num_requestors > 0)) {
+                assert(num_requestors == 1);
                 enqueue(responseOutPort, ResponseMsg, 1) {
                     out_msg.addr := address;
                     out_msg.type := CoherenceResponseType:CacheToCache;
                     out_msg.sender := machineID;
-                    // Only send data to requestor
                     out_msg.Destination := tbe.requestors;
                     out_msg.dataBlk := cache_entry.dataBlk;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
@@ -1045,25 +1048,41 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerLocalReqCompletion;
     }
 
-    transition(S_D, {DataFromLLC, DataFromMem, DataCacheToCache}, CMP) {
+    transition(S_D, {DataFromLLC, DataCacheToCache}, CMP) {
         writeDataResponseToCache;
         externalLoadHit;
         popResponseQueue;
         triggerLocalReqCompletion;
     }
 
-    transition({CMP, S, M, M_A, ML_A}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
+    transition(S_D, DataFromMem, CMP) {
+        writeDataResponseToCache;
+        externalLoadHit;
         popResponseQueue;
+        triggerLocalReqCompletion;
     }
 
-    transition(M_D, {DataFromLLC, DataFromMem, DataCacheToCache}, CMP) {
+    transition(M_D, {DataFromLLC, DataCacheToCache}, CMP) {
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
         triggerLocalReqCompletion;
     }
 
-    transition(ML_D, {DataFromLLC, DataFromMem, DataCacheToCache}, L) {
+    transition(M_D, DataFromMem, CMP) {
+        writeDataResponseToCache;
+        externalStoreHit;
+        popResponseQueue;
+        triggerLocalReqCompletion;
+    }
+
+    transition(ML_D, {DataFromLLC, DataCacheToCache}, L) {
+        writeDataResponseToCache;
+        externalStoreHit;
+        popResponseQueue;
+    }
+
+    transition(ML_D, DataFromMem, L) {
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
@@ -1071,6 +1090,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     // Transition on finalizing transaction
 
+    transition({CMP, S, M, M_A, ML_A}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
+        popResponseQueue;
+    }
     transition(CMP, Complete, *) {
         finalizeTransaction;
         popTriggerQueue;
