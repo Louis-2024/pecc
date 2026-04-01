@@ -14,14 +14,12 @@ enumeration(CoherenceRequestType, desc="Types of coherence requests") {
 
 // RequestMsg
 structure(RequestMsg, desc="Coherence request message", interface="Message") {
-    Cycles                              reqID,                      desc="Request ID";
     Addr                                addr,                       desc="Physical address for this request";
     CoherenceRequestType                type,                       desc="Coherence request type";
     MachineID                           requestor,                  desc="Requestor";
     NetDest                             Destination,                desc="Multicast destination mask";
     MessageSizeType                     MessageSize,                desc="size category of the message";
     DataBlock                           dataBlk,                    desc="Cache line data";
-    bool                                dirty,                      desc="Dirty bit of the cache line";
 
     bool functionalRead(Packet *pkt) {
         if (type == CoherenceRequestType:Put)  {
@@ -51,7 +49,8 @@ structure(ResponseMsg, desc="Response message", interface="Message") {
     Cycles                              reqID,             default="Cycles(0)", desc="Associated request ID";
     Addr                                addr,              desc="Physical address of the cache line";
     DataBlock                           dataBlk,           desc="Cache line data";
-    bool                                dirty,             desc="Dirty bit of the cache line";
+    bool                                owned,             desc="";
+    bool                                invalidate,        desc="";
     
     CoherenceResponseType               type,              desc="Response type";
     MachineID                           sender,            desc="Sender of the response";
@@ -89,12 +88,7 @@ structure(DirectoryMsg, desc="Memory message to/from directory", interface="Mess
     DataBlock DataBlk,            desc="Data to writeback";
     MessageSizeType MessageSize,  desc="size category of the message";
     int Len,                      desc="size of the memory/dma request";
-    // Not all fields used by all protocols:
-    PrefetchBit Prefetch,         desc="Is this a prefetch request";
-    bool ReadX,                   desc="Exclusive";
-    int Acks,                     desc="How many acks to expect";
-
-    NetDest Destination;
+    NetDest Destination,          desc="";
 
     bool functionalRead(Packet *pkt) {
         if ((MessageSize == MessageSizeType:Response_Data) ||

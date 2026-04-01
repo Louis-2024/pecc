@@ -7,81 +7,74 @@ import tqdm
 from multiprocessing.pool import Pool
 
 
-def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB", l1i_size="16kB", mem_size="1GB"):
-    gem5_home = "/gem5"  # Modify here to change the directory path of gem5
-    splash3_dir = f"{gem5_home}/splash-3-static-link/codes"
+def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB",  l1i_size="16kB", l1_assoc=8, llc_assoc=8, mem_size="1GB"):
+    gem5_home = "/gem5/pecc"
+    splash3_dir = "/gem5/pecc/splash-3-static-link/codes"
     config = f"{program}_{protocol}_{ncore}_{llc_size}"
     binary = ""
     stdin = ""
     options = ""
     wkdir = ""
-    outdir = f"{gem5_home}/splash-3-out/{config}"
+    outdir = f"/gem5/pecc/splash-3-out/{config}"
 
-    if program == 'barnes':
-        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
-        options=""
-        stdin=f"{splash3_dir}/apps/{program}/inputs/n65536-p{ncore}"
-        wkdir=f"{splash3_dir}/apps/{program}"
-    elif program == 'fmm':
-        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
-        options=""
-        stdin=f"{splash3_dir}/apps/{program}/inputs/input.{ncore}.65536"
-        wkdir=f"{splash3_dir}/apps/{program}"
-    elif program == 'ocean':
-        binary=f"{splash3_dir}/apps/{program}/contiguous_partitions/{program.upper()}"
-        options=f"-p{ncore} -n514"
-        stdin=""
-        wkdir=f"{splash3_dir}/apps/{program}/contiguous_partitions"
-    elif program == 'radiosity':
-        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
-        options=f"-p {ncore} -ae 5000 -bf 0.015 -en 0.05 -room -batch"
-        stdin=""
-        wkdir=f"{splash3_dir}/apps/{program}"
-    elif program == 'raytrace':
-        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
-        options=f"-p{ncore} -m64 {splash3_dir}/apps/{program}/inputs/balls4.env"
-        stdin=""
-        wkdir=f"{splash3_dir}/apps/{program}"
-    elif program == 'volrend':
-        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
-        options=f"{ncore} {splash3_dir}/apps/{program}/inputs/head 8"
-        stdin=""
-        wkdir=f"{splash3_dir}/apps/{program}"
-    elif program == 'water-nsquared':
-        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
-        options=""
-        stdin=f"{splash3_dir}/apps/{program}/inputs/n3375-p{ncore}"
-        wkdir=f"{splash3_dir}/apps/{program}"
-    elif program == 'water-spatial':
-        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
-        options=""
-        stdin=f"{splash3_dir}/apps/{program}/inputs/n8000-p{ncore}"
-        wkdir=f"{splash3_dir}/apps/{program}"
-    elif program == 'cholesky':
-        binary=f"{splash3_dir}/kernels/{program}/{program.upper()}"
-        options=f"-p{ncore}"
-        stdin=f"{splash3_dir}/kernels/{program}/inputs/tk16.O"
-        wkdir=f"{splash3_dir}/kernels/{program}"
-    elif program == 'fft':
-        binary=f"{splash3_dir}/kernels/{program}/{program.upper()}"
-        options=f"-p{ncore} -m22 -l6 -n16384"
-        stdin=""
-        wkdir=f"{splash3_dir}/kernels/{program}"
-    elif program == 'lu':
-        binary=f"{splash3_dir}/kernels/{program}/contiguous_blocks/{program.upper()}"
-        options=f"-p{ncore} -n1024"
-        stdin=""
-        wkdir=f"{splash3_dir}/kernels/{program}/contiguous_blocks"
+    if program == 'cholesky':
+        binary=f"{splash3_dir}/kernels/cholesky/CHOLESKY"
+        options=f"-p{ncore} -B32 -C65536"
+        stdin=f"{splash3_dir}/kernels/cholesky/inputs/tk16.O"
+        wkdir=f"{splash3_dir}/kernels/cholesky"
     elif program == 'radix':
-        binary=f"{splash3_dir}/kernels/{program}/{program.upper()}"
-        options=f"-p{ncore} -n4194304"
+        binary=f"{splash3_dir}/kernels/radix/RADIX"
+        options=f"-p{ncore} -n2097152"
         stdin=""
-        wkdir=f"{splash3_dir}/kernels/{program}"
+        wkdir=f"{splash3_dir}/kernels/radix"
+    elif program == 'fft':
+        binary=f"{splash3_dir}/kernels/fft/FFT"
+        options=f"-p{ncore} -m20 -l6 -n16384"
+        stdin=""
+        wkdir=f"{splash3_dir}/kernels/fft"
+    elif program == 'lu_contiguous':
+        binary=f"{splash3_dir}/kernels/lu/contiguous_blocks/LU"
+        options=f"-p{ncore} -n768"
+        stdin=""
+        wkdir=f"{splash3_dir}/kernels/lu/contiguous_blocks"
+    elif program == 'lu_non_contig':
+        binary=f"{splash3_dir}/kernels/lu/non_contiguous_blocks/LU"
+        options=f"-p{ncore} -n768"
+        stdin=""
+        wkdir=f"{splash3_dir}/kernels/lu/non_contiguous_blocks"
+    elif program == 'ocean_contiguous':
+        binary=f"{splash3_dir}/apps/ocean/contiguous_partitions/OCEAN"
+        options=f"-p{ncore} -n258"
+        stdin=""
+        wkdir=f"{splash3_dir}/apps/ocean/contiguous_partitions"
+    elif program == 'ocean_non_contig':
+        binary=f"{splash3_dir}/apps/ocean/non_contiguous_partitions/OCEAN"
+        options=f"-p{ncore} -n258"
+        stdin=""
+        wkdir=f"{splash3_dir}/apps/ocean/non_contiguous_partitions"
+    elif program == 'raytrace':
+        binary=f"{splash3_dir}/apps/raytrace/RAYTRACE"
+        options=f"-p{ncore} {splash3_dir}/apps/raytrace/inputs/teapot.env"
+        stdin=""
+        wkdir=f"{splash3_dir}/apps/raytrace"
+    elif program == 'barnes':
+        binary=f"{splash3_dir}/apps/barnes/BARNES"
+        options=""
+        stdin=f"{splash3_dir}/apps/barnes/inputs/n16384-p{ncore}"
+        wkdir=f"{splash3_dir}/apps/barnes"
     else:
         print("Unknown program")
         system.exit(-1)
     
-    command = f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/se.py --ruby --num-cpus {ncore} --cpu-type TimingSimpleCPU --l1d_size {l1d_size} --l1i_size {l1i_size} --l2_size {llc_size} --mem-type SimpleMemory --mem-size {mem_size} -c {binary} --options=\"{options}\""
+    command = (
+        f"{gem5_home}/build/X86_{protocol}/gem5.opt "
+        f"--debug-flags=FlexLLC --debug-file=flexllc.log --debug-start=0 "
+        f"-d {outdir} {gem5_home}/configs/example/se.py --ruby --num-cpus {ncore} "
+        f"--cpu-type TimingSimpleCPU --l1d_size {l1d_size} --l1i_size {l1i_size} "
+        f"--l2_size {llc_size} --mem-type SimpleMemory --mem-size {mem_size} "
+        f"--l1d_assoc {l1_assoc} --l1i_assoc {l1_assoc} --l2_assoc {llc_assoc} "
+        f'-c {binary} --options="{options}"'
+    )
     if stdin:
         command += f" < {stdin}"
     
@@ -100,22 +93,18 @@ def call_proc(args):
 
 if __name__ == '__main__':
     # Generate the commands to run Splash-3 benchmarks
-    programs = ['barnes','fmm','ocean','radiosity','raytrace','water-nsquared','water-spatial','cholesky','fft','lu','radix']
+    programs = ['cholesky', 'radix', 'fft', 'lu_contiguous', 'lu_non_contig', 'ocean_contiguous', 'ocean_non_contig', 'raytrace', 'barnes']
 
     cmds = []
     for program in programs:
         if program == 'raytrace':
-            mem_size = '8GB'
+            mem_size = '4GB'
         else:
             mem_size = '1GB'
 
         for protocol in ['INCL', 'EXCL']:
-            for core_count in [2, 4]:
+            for core_count in [4]:
                 for llc_size in ['1024kB']:
-                    cmds.append(generate_splash3_command(program, protocol, core_count, llc_size, mem_size=mem_size))
-
-            for core_count in [8]:
-                for llc_size in ['256kB', '512kB', '1024kB']:
                     cmds.append(generate_splash3_command(program, protocol, core_count, llc_size, mem_size=mem_size))
 
     pool = Pool(31)  # Modify here to configure the number of cores to run the simulation
