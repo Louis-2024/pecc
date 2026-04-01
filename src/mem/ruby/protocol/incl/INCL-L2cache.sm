@@ -50,6 +50,7 @@ machine(MachineType:L2Cache, "LLC") :
         I_to_I_await_data, AccessPermission:Busy, desc="";
         I_to_IPC_await_data, AccessPermission:Busy, desc="";
         MBPC_to_I_await_ack, AccessPermission:Busy, desc="";
+        MBPC_to_IPC_await_ack, AccessPermission:Busy, desc="";
         LO_to_I_await_ack, AccessPermission:Busy, desc="";
     }
 
@@ -388,7 +389,6 @@ machine(MachineType:L2Cache, "LLC") :
             dir_entry.requestors.clear();
             dir_entry.requestors.add(in_msg.requestor);
             dir_entry.memReadIssueTime := curCycle();
-
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
                 out_msg.addr := in_msg.addr;
                 out_msg.Type := MemoryRequestType:MEMORY_READ;
@@ -397,7 +397,6 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Len := 0;
                 out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
             }
-
             DPRINTF(FlexLLC, "sendMemRead: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
         }
     }
@@ -425,7 +424,7 @@ machine(MachineType:L2Cache, "LLC") :
         dir_entry.forwardOwner.clear();
     }
 
-    action(writebackToMem, desc="Writeback data") {
+    action(sendMemWrite, desc="Writeback data") {
         assert(is_valid(cache_entry));
         Entry dir_entry := getDirectoryEntry(address);
         dir_entry.memWriteIssueTime := curCycle();
@@ -438,6 +437,7 @@ machine(MachineType:L2Cache, "LLC") :
             out_msg.Len := 0;
             out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
         }
+        DPRINTF(FlexLLC, "sendMemWrite: Address = %#x, Sender = %s \n", address, machineID);
     }
 
     action(sendAck, desc="Send Put acknowledgement") {
@@ -633,14 +633,6 @@ machine(MachineType:L2Cache, "LLC") :
         assert(cache_entry.stale == false);
     }
 
-    action(stallAndWaitRequestQueue, desc="...") {
-        Addr stalled_address;
-        peek(requestInPort, RequestMsg) {
-            stalled_address := in_msg.addr;
-        }
-        stall_and_wait(requestInPort, stalled_address);
-    }
-
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
@@ -717,6 +709,12 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
+    transition(I_to_MBPC_await_data, Upgrade, I_to_PC_await_data) {
+        setDirty;
+        setStale;
+        popRequestQueue;
+    }
+
     transition(I_Must_Be_Privately_Cached, {GetS, GetS_NI, GetM, GetM_NI}) {
         popRequestQueue;
     }
@@ -751,7 +749,7 @@ machine(MachineType:L2Cache, "LLC") :
         assertDirty;
         assertUpToDate;
         setClean;
-        writebackToMem;
+        sendMemWrite;
         deallocateCacheBlock;
     }
 
@@ -785,7 +783,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(May_Be_Privately_Cached, Upgrade, Must_Be_Privately_Cached) {BankAccess} {
+    transition(May_Be_Privately_Cached, Upgrade, Must_Be_Privately_Cached) {
         assertUpToDate;
         setDirty;
         setStale;
@@ -802,7 +800,7 @@ machine(MachineType:L2Cache, "LLC") :
         assertDirty;
         assertUpToDate;
         setClean;
-        writebackToMem;
+        sendMemWrite;
         deallocateCacheBlock;
     }
 
@@ -813,6 +811,16 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
+    transition(MBPC_to_I_await_ack, Upgrade, MBPC_to_IPC_await_ack) {
+        popRequestQueue;
+    }
+
+    transition(MBPC_to_IPC_await_ack, Mem_Ack, I_Must_Be_Privately_Cached) {
+        decrementOutstandingMemRequest;
+        profileMemWriteLatency;
+        popMemResponseQueue;
+        wakeUpAllQueues;
+    }
 
     // transitions from Must_Be_Privately_Cached
 
@@ -835,20 +843,18 @@ machine(MachineType:L2Cache, "LLC") :
         deallocateCacheBlock;
     }
 
-    // transient states
-
-    transition({I_to_MBPC_await_data, I_to_PC_await_data}, {Replacement_Silent, Replacement_Writeback}) {
-        stallAndWaitRequestQueue;
-    }
-
     // I_to_MBPC_await_data
+
+    transition(I_to_MBPC_await_data, Replacement_Silent, I_to_I_await_data) {BankAccess} {
+        deallocateCacheBlock;
+    }
 
     transition(I_to_MBPC_await_data, {GetS, GetS_NI}) {
         addRequestorToMemRead;
         popRequestQueue;
     }
 
-    transition(I_to_MBPC_await_data, {GetM, GetM_NI}, I_to_PC_await_data) {BankAccess} {
+    transition(I_to_MBPC_await_data, {GetM, GetM_NI}, I_to_PC_await_data) {
         setDirty;
         setStale;
         addRequestorToMemRead;
@@ -886,6 +892,10 @@ machine(MachineType:L2Cache, "LLC") :
 
     // I_to_PC_await_data
 
+    transition(I_to_PC_await_data, Replacement_Silent, I_to_IPC_await_data) {BankAccess} {
+        deallocateCacheBlock;
+    }
+
     transition(I_to_PC_await_data, {GetS, GetS_NI, GetM, GetM_NI}) {
         popRequestQueue;
     }
@@ -896,7 +906,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(I_to_IPC_await_data, {GetS, GetM}, I_to_PC_await_data) {
+    transition(I_to_IPC_await_data, {GetS, GetM}, I_to_PC_await_data) {BankAccess} {
         allocateCacheBlock;
         setDirty;
         setStale;

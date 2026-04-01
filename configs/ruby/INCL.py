@@ -184,6 +184,7 @@ def create_system(
             dataAccessLatency=options.l2_latency,
             tagAccessLatency=options.l2_latency,
             resourceStalls=True,
+            replacement_policy=FIFORP()
         )
         dir_memory = RubyDirectoryMemory()
         dir_memory.addr_ranges = [
