@@ -51,6 +51,7 @@ machine(MachineType:L2Cache, "LLC") :
         I_to_IPC_await_data, AccessPermission:Busy, desc="";
         MBPC_to_I_await_ack, AccessPermission:Busy, desc="";
         MBPC_to_IPC_await_ack, AccessPermission:Busy, desc="";
+        MBPC_to_LO_await_ack, AccessPermission:Busy, desc="";
         LO_to_I_await_ack, AccessPermission:Busy, desc="";
     }
 
@@ -310,7 +311,7 @@ machine(MachineType:L2Cache, "LLC") :
                         trigger(Event:PutM, in_msg.addr, cache_entry, tbe);
                     } else {
                         // NI
-                        assert(getState(tbe, cache_entry, in_msg.addr) == State:I_Must_Be_Privately_Cached);
+                        assert((getState(tbe, cache_entry, in_msg.addr) == State:I_Must_Be_Privately_Cached) || (getState(tbe, cache_entry, in_msg.addr) == State:MBPC_to_IPC_await_ack));
                         if (cacheMemory.cacheAvail(in_msg.addr)) {
                             // if there exists vac, insert directly
                             DPRINTF(FlexLLC, "PutM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
@@ -633,6 +634,14 @@ machine(MachineType:L2Cache, "LLC") :
         assert(cache_entry.stale == false);
     }
 
+    action(stallAndWaitRequestQueue, desc="...") {
+        Addr stalled_address;
+        peek(requestInPort, RequestMsg) {
+            stalled_address := in_msg.addr;
+        }
+        stall_and_wait(requestInPort, stalled_address);
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
@@ -820,6 +829,32 @@ machine(MachineType:L2Cache, "LLC") :
         profileMemWriteLatency;
         popMemResponseQueue;
         wakeUpAllQueues;
+    }
+
+    transition(MBPC_to_IPC_await_ack, PutM, MBPC_to_LO_await_ack) {BankAccess} {
+        allocateCacheBlock;
+        setDirty;
+        setUpToDate;
+        writeDataToCache;
+        sendAck;
+        popRequestQueue;
+    }
+
+    transition(MBPC_to_IPC_await_ack, {GetS, GetS_NI, GetM, GetM_NI}) {
+        popRequestQueue;
+    }
+
+    // transitions from MBPC_to_LO_await_ack
+
+    transition(MBPC_to_LO_await_ack, Mem_Ack, Must_Be_LLC_Only) {
+        decrementOutstandingMemRequest;
+        profileMemWriteLatency;
+        popMemResponseQueue;
+        wakeUpAllQueues;
+    }
+
+    transition(MBPC_to_LO_await_ack, {GetS, GetS_NI, GetM, GetM_NI}) {
+        stallAndWaitRequestQueue;
     }
 
     // transitions from Must_Be_Privately_Cached

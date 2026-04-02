@@ -135,7 +135,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         bool isLockRequest,                     desc="Indicator of lock request";
         Addr from_addr,                         desc="Address of request that triggers replacement";
         bool to_I,                              desc="Indicator of invalidation";
-        bool stopFurtherForwarding,             desc="";
+        bool disableAddingRequestor,            desc="";
     }
 
     structure(TBETable, external="yes") {
@@ -725,14 +725,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
         tbe.to_I := true;
     }
 
-    action(setStopFurtherForwarding, desc="") {
+    action(disableAddingRequestor, desc="") {
         assert(is_valid(tbe));
-        tbe.stopFurtherForwarding := true;
+        tbe.disableAddingRequestor := true;
     }
 
     action(checkAndAddRequestor, desc="Add requestor") {
         assert(is_valid(tbe));
-        if ((!tbe.to_I) && (!tbe.stopFurtherForwarding)) {
+        if ((!tbe.to_I) && (!tbe.disableAddingRequestor)) {
             peek(requestInPort, RequestMsg) {
                 tbe.requestors.add(in_msg.requestor);
             }
@@ -940,7 +940,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(S_D, OtherGetS) {
         checkAndAddRequestor;
-        setStopFurtherForwarding;
+        disableAddingRequestor;
         popRequestQueue;
     }
 

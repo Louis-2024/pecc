@@ -8,14 +8,33 @@ from multiprocessing.pool import Pool
 
 
 def generate_synth_command(protocol, ncore):
-    gem5_home = "/gem5"  # Modify here to change the directory path of gem5
+    gem5_home = "/gem5/pecc"  # Modify here to change the directory path of gem5
     config = f"{protocol}-{ncore}"
     outdir = f"{gem5_home}/synth-out/{config}"
 
-    if protocol == 'INCL':
-        command = f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_trace_test.py --ruby --num-cpus {ncore} --l1d_size 16kB --l1i_size 16kB --l2_size 1024kB  --mem-type SimpleMemory --mem-size 8GB"
-    else:
-        command=f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_random_test.py --ruby --num-cpus {ncore} --l1d_size 256B --l1i_size 256B --l2_size 8192B --mem-type SimpleMemory --maxloads 10000"
+    # if protocol == 'INCL':
+    #     command = (
+    #         f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_trace_test.py "
+    #         f"--ruby --num-cpus {ncore} --l1d_size 16kB --l1i_size 16kB --l2_size 1024kB  --mem-type SimpleMemory --mem-size 8GB "
+    #     )
+    # else:
+    #     command=(
+    #         f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_random_test.py "
+    #         f"--ruby --num-cpus {ncore} --l1d_size 256B --l1i_size 256B --l2_size 8192B --mem-type SimpleMemory --maxloads 10000 "
+    #     )
+
+    # command=(
+    #     f"{gem5_home}/build/X86_{protocol}/gem5.opt "
+    #     # f"--debug-flags=FlexLLC --debug-file=flexllc.log --debug-start=0 "
+    #     f"-d {outdir} {gem5_home}/configs/example/ruby_random_test.py "
+    #     f"--ruby --num-cpus {ncore} --l1d_size 256B --l1i_size 256B --l2_size 8192B --mem-type SimpleMemory --maxloads 100000 "
+    # )
+
+    command = (
+        f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_trace_test.py "
+        f"--ruby --num-cpus {ncore} --l1d_size 16kB --l1i_size 16kB --l2_size 1024kB  --mem-type SimpleMemory --mem-size 8GB "
+    )
+    
     return (command, outdir, config)
 
 
@@ -31,7 +50,7 @@ def call_proc(args):
 if __name__ == '__main__':
     cmds = []
     for protocol in ['INCL', 'EXCL']:
-        for core_count in [2, 3, 4, 5, 6, 7, 8]:
+        for core_count in [4]:
             cmds.append(generate_synth_command(protocol, core_count))
 
     pool = Pool(8)  # Modify here to configure the number of cores to run the simulation
