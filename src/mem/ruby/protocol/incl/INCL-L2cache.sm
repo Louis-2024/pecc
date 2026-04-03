@@ -654,7 +654,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(I_to_MBPC_await_data, Mem_Response, May_Be_Privately_Cached) {BankAccess} {
+    transition(I_to_MBPC_await_data, Mem_Response, May_Be_Privately_Cached) {
         decrementOutstandingMemRequest;
         writeMemResponseToCache;
         forwardMemResponse;
@@ -672,7 +672,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(I_to_PC_await_data, Mem_Response, Must_Be_Privately_Cached) {BankAccess} {
+    transition(I_to_PC_await_data, Mem_Response, Must_Be_Privately_Cached) {
         decrementOutstandingMemRequest;
         writeMemResponseToCache;
         forwardMemResponse;

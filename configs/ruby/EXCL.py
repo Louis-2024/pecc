@@ -185,7 +185,7 @@ def create_system(
             dataAccessLatency=options.l2_latency,
             tagAccessLatency=options.l2_latency,
             resourceStalls=True,
-            replacement_policy=FIFORP()
+            replacement_policy=FIFORP(),
         )
         dir_memory = RubyDirectoryMemory()
         dir_memory.addr_ranges = [
@@ -207,7 +207,7 @@ def create_system(
             ruby_system=ruby_system,
             cache_access_latency=options.l2_latency,
             profiler=profiler,
-            maxOutstandingMemRequests=16,
+            maxOutstandingMemRequests=1,
         )
 
         # Set L2 controller in ruby system
