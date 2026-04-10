@@ -62,13 +62,28 @@ def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB"
         options=""
         stdin=f"{splash3_dir}/apps/barnes/inputs/n16384-p{ncore}"
         wkdir=f"{splash3_dir}/apps/barnes"
+    elif program == 'water-nsquared':
+        binary=f"{splash3_dir}/apps/water-nsquared/WATER-NSQUARED"
+        options=""
+        stdin=f"{splash3_dir}/apps/water-nsquared/inputs/n3375-p{ncore}"
+        wkdir=f"{splash3_dir}/apps/water-nsquared"
+    elif program == 'water-spatial':
+        binary=f"{splash3_dir}/apps/water-spatial/WATER-SPATIAL"
+        options=""
+        stdin=f"{splash3_dir}/apps/water-spatial/inputs/n8000-p{ncore}"
+        wkdir=f"{splash3_dir}/apps/water-spatial"
+    elif program == 'fmm':
+        binary=f"{splash3_dir}/apps/fmm/FMM"
+        options=""
+        stdin=f"{splash3_dir}/apps/fmm/inputs/input.{ncore}.16384"
+        wkdir=f"{splash3_dir}/apps/fmm"
     else:
         print("Unknown program")
         system.exit(-1)
     
     command = (
         f"{gem5_home}/build/X86_{protocol}/gem5.opt "
-        f"--debug-flags=FlexLLC --debug-file=flexllc.log --debug-start=0 "
+        # f"--debug-flags=FlexLLC --debug-file=flexllc.log --debug-start=0 "
         f"-d {outdir} {gem5_home}/configs/example/se.py --ruby --num-cpus {ncore} "
         f"--cpu-type TimingSimpleCPU --l1d_size {l1d_size} --l1i_size {l1i_size} "
         f"--l2_size {llc_size} --mem-type SimpleMemory --mem-size {mem_size} "
@@ -93,7 +108,9 @@ def call_proc(args):
 
 if __name__ == '__main__':
     # Generate the commands to run Splash-3 benchmarks
-    programs = ['cholesky', 'radix', 'fft', 'lu_contiguous', 'lu_non_contig', 'ocean_contiguous', 'ocean_non_contig', 'raytrace', 'barnes']
+    programs = ['cholesky', 'radix', 'fft', 'lu_contiguous', 'lu_non_contig', 
+                'ocean_contiguous', 'ocean_non_contig', 'fmm', 'barnes']
+                # 'water-nsquared', 'water-spatial', 'raytrace'] # heavyweight
 
     cmds = []
     for program in programs:

@@ -34,6 +34,10 @@ class CustomProfiler : public SimObject
             statistics::Scalar m_num_back_invalidation_wb;
             statistics::Scalar m_num_put_request;
             statistics::Histogram m_mem_latency_hist;
+
+            statistics::Scalar m_num_writeback_from_l1_to_l2;
+            statistics::Scalar m_num_l2_reads;
+            statistics::Scalar m_num_l2_writes;
         } customProfilerStats;
 
     public:
@@ -51,6 +55,10 @@ class CustomProfiler : public SimObject
         void profileBackInvalidationWB();
         void profilePutRequest();
         void profileMemLatency(Cycles latency);
+
+        void profileWritebackFromL1ToL2();
+        void profileL2Reads();
+        void profileL2Writes();
 };
 
 

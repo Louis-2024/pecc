@@ -305,6 +305,8 @@ machine(MachineType:L2Cache, "LLC") :
             cache_entry.dirty := in_msg.dirty;
             cacheMemory.setMRU(cache_entry);
         }
+        profiler.profileWritebackFromL1ToL2();
+        profiler.profileL2Writes();
     }
 
     // actions on out_port
@@ -348,6 +350,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
             }
         }
+        profiler.profileL2Reads();
     }
 
     action(checkAndSendAck, desc="Send Put acknowledgement") {
@@ -398,6 +401,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.MessageSize := MessageSizeType:Response_Data;
             }
         }
+        profiler.profileL2Reads();
     }
 
     action(forwardMemResponse, desc="Forward memory data response") {

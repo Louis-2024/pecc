@@ -372,6 +372,8 @@ machine(MachineType:L2Cache, "LLC") :
             cache_entry.dataBlk := in_msg.dataBlk;
             cacheMemory.setMRU(cache_entry);
         }
+        profiler.profileWritebackFromL1ToL2();
+        profiler.profileL2Writes();
     }
 
     action(writeMemResponseToCache, desc="Write data of memory response to cache") {
@@ -380,6 +382,7 @@ machine(MachineType:L2Cache, "LLC") :
             cache_entry.dataBlk := in_msg.DataBlk;
             cacheMemory.setMRU(cache_entry);
         }
+        profiler.profileL2Writes();
     }
 
     // actions on out_port
@@ -438,6 +441,7 @@ machine(MachineType:L2Cache, "LLC") :
             out_msg.Len := 0;
             out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
         }
+        profiler.profileL2Reads();
         DPRINTF(FlexLLC, "sendMemWrite: Address = %#x, Sender = %s \n", address, machineID);
     }
 
@@ -451,7 +455,6 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.add(in_msg.requestor);
                 out_msg.MessageSize := MessageSizeType:Writeback_Control;
             }
-
             DPRINTF(FlexLLC, "sendAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
         }
     }
@@ -472,6 +475,7 @@ machine(MachineType:L2Cache, "LLC") :
             }
             DPRINTF(FlexLLC, "sendDataToOwner: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
         }
+        profiler.profileL2Reads();
     }
 
     action(sendDataToSharer, desc="") {
@@ -490,6 +494,7 @@ machine(MachineType:L2Cache, "LLC") :
             }
             DPRINTF(FlexLLC, "sendDataToSharer: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
         }
+        profiler.profileL2Reads();
     }
 
     action(forwardAck, desc="Send Put acknowledgement") {

@@ -27,7 +27,11 @@ CustomProfiler::CustomProfilerStats::CustomProfilerStats(statistics::Group *pare
       ADD_STAT(m_num_back_invalidation, "..."),
       ADD_STAT(m_num_back_invalidation_wb, "..."),
       ADD_STAT(m_num_put_request, "..."),
-      ADD_STAT(m_mem_latency_hist, "...")
+      ADD_STAT(m_mem_latency_hist, "..."),
+
+      ADD_STAT(m_num_writeback_from_l1_to_l2, "..."),
+      ADD_STAT(m_num_l2_reads, "..."),
+      ADD_STAT(m_num_l2_writes, "...")
 {
     m_mem_latency_hist
         .init(10)
@@ -91,6 +95,21 @@ CustomProfiler::profileBackInvalidationWB(){
 void 
 CustomProfiler::profileMemLatency(Cycles latency) {
     customProfilerStats.m_mem_latency_hist.sample(latency, 1);
+}
+
+void 
+CustomProfiler::profileWritebackFromL1ToL2(){
+    customProfilerStats.m_num_writeback_from_l1_to_l2++;
+}
+
+void
+CustomProfiler::profileL2Reads(){
+    customProfilerStats.m_num_l2_reads++;
+}
+
+void
+CustomProfiler::profileL2Writes(){
+    customProfilerStats.m_num_l2_writes++;
 }
 
 } // namespace ruby
