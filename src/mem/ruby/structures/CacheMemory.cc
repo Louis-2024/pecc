@@ -339,10 +339,10 @@ CacheMemory::cacheProbe(Addr address) const
 }
 
 Addr
-CacheMemory::cacheProbe_clean_or_stale(Addr address) const
+CacheMemory::cleanCacheProbe(Addr address) const
 {
     assert(address == makeLineAddress(address));
-    assert(clean_or_stale_avail(address));
+    assert(cleanCacheAvail(address));
     AbstractCacheEntry* victim_entry = nullptr;
     Tick lastAccessTime = MaxTick;
     int64_t cacheSet = addressToCacheSet(address);
@@ -351,7 +351,7 @@ CacheMemory::cacheProbe_clean_or_stale(Addr address) const
         if (current_entry == nullptr) {
             continue;
         }
-        if ((!current_entry->getDirty()) || (current_entry->getStale())) {
+        if (!current_entry->getDirty()) {
             if (current_entry->getLastAccess() < lastAccessTime){
                 victim_entry = current_entry;
                 lastAccessTime = current_entry->getLastAccess();
@@ -363,7 +363,7 @@ CacheMemory::cacheProbe_clean_or_stale(Addr address) const
 }
 
 bool
-CacheMemory::clean_or_stale_avail(Addr address) const
+CacheMemory::cleanCacheAvail(Addr address) const
 {
     int64_t cacheSet = addressToCacheSet(address);
     for (int i = 0; i < m_cache_assoc; i++) {
@@ -371,7 +371,7 @@ CacheMemory::clean_or_stale_avail(Addr address) const
         if (entry == nullptr) {
             continue;
         }
-        if ((!entry->getDirty()) || (entry->getStale())) {
+        if (!entry->getDirty()) {
             return true;
         }
     }

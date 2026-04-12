@@ -197,8 +197,8 @@ structure (DirectoryMemory, external = "yes") {
 structure (CacheMemory, external = "yes") {
   bool cacheAvail(Addr);
   Addr cacheProbe(Addr);
-  Addr cacheProbe_clean_or_stale(Addr);
-  bool clean_or_stale_avail(Addr);
+  bool cleanCacheAvail(Addr);
+  Addr cleanCacheProbe(Addr);
 
   AbstractCacheEntry getNullEntry();
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry);
