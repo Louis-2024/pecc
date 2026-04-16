@@ -45,9 +45,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     state_declaration(State, desc="Cache states", default="L1Cache_State_I") {
         // Stable states
-        I, AccessPermission:Invalid, desc="Not present (Invalid)";
-        S, AccessPermission:Read_Only, desc="Valid, read-only, shared, dirty/clean, without ownership";
-        M, AccessPermission:Read_Write, desc="Valid, read/write, unique, dirty, with ownership";
+        M, AccessPermission:Read_Write, desc="";
+        O, AccessPermission:Read_Only, desc="";
+        S, AccessPermission:Read_Only, desc="";
+        I, AccessPermission:Invalid, desc="";
 
         // Special stable state to support locked RMW atomic instruction
         L, AccessPermission:Read_Write, desc="Locked in exclusive mode";
@@ -122,6 +123,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         State state,            desc="Cache state";
         DataBlock dataBlk,      desc="Data block";
         bool owned,             desc="Owned?";
+        bool shared,            desc="Shared?";
     }
 
     // TBE
@@ -131,11 +133,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
         
         // Transaction buffer fields                   
         CoherenceRequestType requestType,       desc="Pending request type";
+        Cycles reqID,                           desc="Request ID";
         NetDest requestors,                     desc="Pending requestors";
         bool isLockRequest,                     desc="Indicator of lock request";
         Addr from_addr,                         desc="Address of request that triggers replacement";
         bool to_I,                              desc="Indicator of invalidation";
-        bool disableAddingRequestor,            desc="";
     }
 
     structure(TBETable, external="yes") {
@@ -223,10 +225,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
 
         bool owned := cache_entry.owned;
-        if (!owned) {
-            return State:S;
+        bool shared := cache_entry.shared;
+        if (owned) {
+            if (shared) {
+                return State:O;
+            }
+            return State:M;
         }
-        return State:M;
+        return State:S;
     }
 
     State getState(TBE tbe, CacheEntry cache_entry, Addr addr) {
@@ -510,7 +516,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
     action(sendGetS, desc="Issue GetS") {
         assert(is_valid(tbe));
         profiler.profileGetRequest();
+        tbe.reqID := curCycle();
         enqueue(requestOutPort, RequestMsg, 1) {
+            out_msg.reqID := tbe.reqID;
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:GetS;
             out_msg.requestor := machineID;
@@ -525,7 +533,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
     action(sendGetM, desc="Issue GetM") {
         assert(is_valid(tbe));
         profiler.profileGetRequest();
+        tbe.reqID := curCycle();
         enqueue(requestOutPort, RequestMsg, 1) {
+            out_msg.reqID := tbe.reqID;
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:GetM;
             out_msg.requestor := machineID;
@@ -539,7 +549,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     action(sendUpg, desc="Issue Upg") {
         assert(is_valid(tbe));
+        tbe.reqID := curCycle();
         enqueue(requestOutPort, RequestMsg, 1) {
+            out_msg.reqID := tbe.reqID;
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:Upg;
             out_msg.requestor := machineID;
@@ -555,7 +567,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
         assert(is_valid(tbe));
         assert(is_valid(cache_entry));
         profiler.profilePutRequest();
+        tbe.reqID := curCycle();
         enqueue(requestOutPort, RequestMsg, 1) {
+            out_msg.reqID := tbe.reqID;
             out_msg.addr := address;
             out_msg.type := CoherenceRequestType:Put;
             out_msg.requestor := machineID;
@@ -568,17 +582,17 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
-    action(sendDataResponseFromOwner, desc="Send data response to requestor") {
+    action(sendDataResponse, desc="") {
         peek(requestInPort, RequestMsg) {
             if (is_valid(cache_entry)) {
                 enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                    out_msg.reqID := in_msg.reqID;
                     out_msg.addr := address;
                     out_msg.type := CoherenceResponseType:CacheToCache;
                     out_msg.sender := machineID;
                     out_msg.Destination.add(in_msg.requestor);
                     out_msg.dataBlk := cache_entry.dataBlk;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.owned := true;
                 }
             }
         }
@@ -659,6 +673,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
             // otherwise, reset cache entry field
             if (is_valid(cache_entry)) {
                 cache_entry.owned := false;
+                cache_entry.shared := false;
             }
         }
     }
@@ -706,9 +721,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         peek(responseInPort, ResponseMsg) {
             assert(is_valid(cache_entry));
             cache_entry.dataBlk := in_msg.dataBlk;
-            if (in_msg.owned) {
-                cache_entry.owned := true;
-            }
             if (in_msg.invalidate) {
                 tbe.to_I := true;
             }
@@ -720,19 +732,24 @@ machine(MachineType:L1Cache, "L1 Cache") :
         cache_entry.owned := true;
     }
 
+    action(setShared, desc="") {
+        assert(is_valid(cache_entry));
+        cache_entry.shared := true;
+    }
+
+    action(unsetShared, desc="") {
+        assert(is_valid(cache_entry));
+        cache_entry.shared := false;
+    }
+
     action(setToI, desc="") {
         assert(is_valid(tbe));
         tbe.to_I := true;
     }
 
-    action(disableAddingRequestor, desc="") {
-        assert(is_valid(tbe));
-        tbe.disableAddingRequestor := true;
-    }
-
     action(checkAndAddRequestor, desc="Add requestor") {
         assert(is_valid(tbe));
-        if ((!tbe.to_I) && (!tbe.disableAddingRequestor)) {
+        if (!tbe.to_I) {
             peek(requestInPort, RequestMsg) {
                 tbe.requestors.add(in_msg.requestor);
             }
@@ -740,33 +757,25 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     action(finalizeTransaction, desc="...") {
-        // Coherence request completed, deallocate tbe entry
         assert(is_valid(tbe));
         if (tbe.requestType == CoherenceRequestType:Put) {
-            // if transaction is replacement
             Addr from_addr := tbe.from_addr;
-            // deallocate cache entry
             deallocateCacheEntry(address);
             unset_cache_entry();
-            // cache set has space now, wake up dependent request
             wakeup_port(mandatoryInPort, from_addr);
         } else {
-            // if transaction is Store or Lock or Load or Inv request,
-            // forward response to potential pending requestors
             assert(is_valid(cache_entry));
             int num_requestors := tbe.requestors.count();
             if (cache_entry.owned && (num_requestors > 0)) {
-                assert(num_requestors == 1);
                 enqueue(responseOutPort, ResponseMsg, 1) {
+                    out_msg.reqID := tbe.reqID;
                     out_msg.addr := address;
                     out_msg.type := CoherenceResponseType:CacheToCache;
                     out_msg.sender := machineID;
                     out_msg.Destination := tbe.requestors;
                     out_msg.dataBlk := cache_entry.dataBlk;
                     out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.owned := cache_entry.owned;
                 }
-                tbe.to_I := true;
             }
             if (tbe.to_I) {
                 deallocateCacheEntry(address);
@@ -827,13 +836,13 @@ machine(MachineType:L1Cache, "L1 Cache") :
         deallocateCacheEntry;
     }
 
-    transition(M, Replacement) {
+    transition({M, O}, Replacement) {
         allocateTBE;
         initiateReplacement;
         sendBusRequest;
     }
 
-    transition({S, M}, {Ifetch, Load}) {
+    transition({S, M, O}, {Ifetch, Load}) {
         loadHit;
         popMandatoryQueue;
     }
@@ -863,7 +872,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popResponseQueue;
     }
 
-    transition(M, Store, M) {
+    transition(M, Store) {
         storeHit;
         popMandatoryQueue;
     }
@@ -875,14 +884,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popMandatoryQueue;
     }
 
-    transition(S, Store) {
+    transition({S, O}, Store) {
         allocateTBE;
         initiateGetM;
         sendBusRequest;
         popMandatoryQueue;
     }
 
-    transition(S, Lock) {
+    transition({S, O}, Lock) {
         allocateTBE;
         initiateGetMLocked;
         sendBusRequest;
@@ -919,9 +928,35 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition(M, {OtherGetS, OtherGetM}, I) {
-        sendDataResponseFromOwner;
+    transition(M, OtherGetS, O) {
+        setShared;
+        sendDataResponse;
+        popRequestQueue;
+    }
+
+    transition(M, OtherGetM, I) {
+        sendDataResponse;
         invalidateCacheEntry;
+        popRequestQueue;
+    }
+
+    transition(O, OtherGetS) {
+        sendDataResponse;
+        popRequestQueue;
+    }
+
+    transition(O, OtherGetM, I) {
+        sendDataResponse;
+        invalidateCacheEntry;
+        popRequestQueue;
+    }
+
+    transition(O, OtherUpg, I) {
+        invalidateCacheEntry;
+        popRequestQueue;
+    }
+
+    transition(O, OtherPut) {
         popRequestQueue;
     }
 
@@ -939,8 +974,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(S_D, OtherGetS) {
+        setShared;
         checkAndAddRequestor;
-        disableAddingRequestor;
         popRequestQueue;
     }
 
@@ -948,9 +983,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition({M_D, ML_D, L}, {OtherGetM, OtherGetS}) {
+    transition({M_D, ML_D, L}, OtherGetM) {
         checkAndAddRequestor;
         setToI;
+        popRequestQueue;
+    }
+
+    transition({M_D, ML_D, L}, OtherGetS) {
+        setShared;
+        checkAndAddRequestor;
         popRequestQueue;
     }
 
@@ -980,12 +1021,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popBusGrantQueue;
     }
 
-    transition(S, BusGrantDoGetM, M_A) {
+    transition({S, O}, BusGrantDoGetM, M_A) {
         sendUpg;
         popBusGrantQueue;
     }
 
-    transition(S, BusGrantDoGetMLocked, ML_A) {
+    transition({S, O}, BusGrantDoGetMLocked, ML_A) {
         sendUpg;
         popBusGrantQueue;
     }
@@ -1002,7 +1043,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popBusGrantQueue;
     }
     
-    transition(M, BusGrantDoPut, I_AD) {
+    transition({M, O}, BusGrantDoPut, I_AD) {
         sendPut;
         popBusGrantQueue;
     }
@@ -1015,16 +1056,19 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(M_AD, OwnGetM, M_D) {
         setOwned;
+        unsetShared;
         popRequestQueue;
     }
 
     transition(ML_AD, OwnGetM, ML_D) {
         setOwned;
+        unsetShared;
         popRequestQueue;
     }
 
     transition(M_A, OwnUpg, CMP) {
         setOwned;
+        unsetShared;
         upgStoreHit;
         popRequestQueue;
         triggerLocalReqCompletion;
@@ -1032,6 +1076,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     transition(ML_A, OwnUpg, L) {
         setOwned;
+        unsetShared;
         upgStoreHit;
         popRequestQueue;
     }

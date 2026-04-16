@@ -14,6 +14,7 @@ enumeration(CoherenceRequestType, desc="Types of coherence requests") {
 
 // RequestMsg
 structure(RequestMsg, desc="Coherence request message", interface="Message") {
+    Cycles                              reqID,                      desc="Associated request ID";
     Addr                                addr,                       desc="Physical address for this request";
     CoherenceRequestType                type,                       desc="Coherence request type";
     MachineID                           requestor,                  desc="Requestor";
@@ -49,7 +50,6 @@ structure(ResponseMsg, desc="Response message", interface="Message") {
     Cycles                              reqID,             default="Cycles(0)", desc="Associated request ID";
     Addr                                addr,              desc="Physical address of the cache line";
     DataBlock                           dataBlk,           desc="Cache line data";
-    bool                                owned,             desc="";
     bool                                invalidate,        desc="";
     
     CoherenceResponseType               type,              desc="Response type";
