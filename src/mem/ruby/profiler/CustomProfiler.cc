@@ -31,7 +31,9 @@ CustomProfiler::CustomProfilerStats::CustomProfilerStats(statistics::Group *pare
 
       ADD_STAT(m_num_writeback_from_l1_to_l2, "..."),
       ADD_STAT(m_num_l2_reads, "..."),
-      ADD_STAT(m_num_l2_writes, "...")
+      ADD_STAT(m_num_l2_writes, "..."),
+
+      ADD_STAT(m_num_repetitive_l2_writes, "...")
 {
     m_mem_latency_hist
         .init(10)
@@ -110,6 +112,11 @@ CustomProfiler::profileL2Reads(){
 void
 CustomProfiler::profileL2Writes(){
     customProfilerStats.m_num_l2_writes++;
+}
+
+void
+CustomProfiler::profileRepetitiveL2Writes(){
+    customProfilerStats.m_num_repetitive_l2_writes++;
 }
 
 } // namespace ruby

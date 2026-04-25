@@ -199,6 +199,8 @@ structure (CacheMemory, external = "yes") {
   Addr cacheProbe(Addr);
   bool cleanCacheAvail(Addr);
   Addr cleanCacheProbe(Addr);
+  bool dirtyCacheAvail(Addr);
+  Addr dirtyCacheProbe(Addr);
 
   AbstractCacheEntry getNullEntry();
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry);
@@ -272,4 +274,5 @@ structure(CustomProfiler, external="yes") {
     void profileWritebackFromL1ToL2();
     void profileL2Reads();
     void profileL2Writes();
+    void profileRepetitiveL2Writes();
 }

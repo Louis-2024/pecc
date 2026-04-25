@@ -38,6 +38,8 @@ class CustomProfiler : public SimObject
             statistics::Scalar m_num_writeback_from_l1_to_l2;
             statistics::Scalar m_num_l2_reads;
             statistics::Scalar m_num_l2_writes;
+
+            statistics::Scalar m_num_repetitive_l2_writes;
         } customProfilerStats;
 
     public:
@@ -59,6 +61,7 @@ class CustomProfiler : public SimObject
         void profileWritebackFromL1ToL2();
         void profileL2Reads();
         void profileL2Writes();
+        void profileRepetitiveL2Writes();
 };
 
 

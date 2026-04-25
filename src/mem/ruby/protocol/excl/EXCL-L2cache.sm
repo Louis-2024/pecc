@@ -78,6 +78,8 @@ machine(MachineType:L2Cache, "LLC") :
         bool writeback_triggered, desc="Indicator of chained eviction";
         Cycles memReadIssueTime, desc="Performance metric monitor field";
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
+
+        bool L2ToL1, desc="";
     }
 
     // Cache entry
@@ -451,6 +453,27 @@ machine(MachineType:L2Cache, "LLC") :
         profiler.profileMemLatency(curCycle() - dir_entry.memReadIssueTime);
     }
 
+    action(setL2ToL1, desc="...") {
+        Entry dir_entry := getDirectoryEntry(address);
+        dir_entry.L2ToL1 := true;
+    }
+
+    action(unsetL2ToL1, desc="...") {
+        Entry dir_entry := getDirectoryEntry(address);
+        dir_entry.L2ToL1 := false;
+    }
+
+    action(profileRepetitiveL2Writes, desc="...") {
+        peek(requestInPort, RequestMsg) {
+            if (!in_msg.modifiedInCurrentFetch) {
+                Entry dir_entry := getDirectoryEntry(address);
+                if (dir_entry.L2ToL1) {
+                    profiler.profileRepetitiveL2Writes();
+                }
+            }
+        }
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
@@ -476,6 +499,7 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     transition(I, Put_Clean, V_Clean) {BankAccess} {
+        profileRepetitiveL2Writes;
         allocateCacheBlock;
         writeDataToCache;
         checkAndSendAck;
@@ -483,6 +507,7 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     transition(I, Put_Dirty, V_Dirty) {BankAccess} {
+        profileRepetitiveL2Writes;
         allocateCacheBlock;
         writeDataToCache;
         checkAndSendAck;
@@ -490,16 +515,19 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     transition({V_Clean, V_Dirty}, Get, I) {BankAccess} {
+        setL2ToL1;
         sendDataFromCache;
         deallocateCacheBlock;
         popRequestQueue;
     }
 
     transition(V_Clean, Replacement, InMem) {BankAccess} {
+        unsetL2ToL1;
         deallocateCacheBlock;
     }
 
     transition(V_Dirty, Replacement, MemWritePending) {BankAccess, MemAccess} {
+        unsetL2ToL1;
         writeback;
         deallocateCacheBlock;
     }

@@ -130,6 +130,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
         bool dirty,             default="false", desc="Dirty bit";
         bool owned,             default="false", desc="Owned?";
         NetDest sharers,        desc="Sharers";
+
+        bool modifiedInCurrentFetch,            desc="";
     }
 
     // TBE
@@ -644,6 +646,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
             out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
                                     l2_select_low_bit, l2_select_num_bits, intToID(0)));
             out_msg.MessageSize := MessageSizeType:Control;
+
+            out_msg.modifiedInCurrentFetch := cache_entry.modifiedInCurrentFetch;
         }
     }
 
@@ -700,6 +704,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
         L1Dcache.setMRU(cache_entry);
         sequencer.writeCallback(address, cache_entry.dataBlk, false);
         cache_entry.dirty := true;
+
+        cache_entry.modifiedInCurrentFetch := true;
     }
 
     action(externalStoreHit, desc="External store hit (was a miss)") {
@@ -719,6 +725,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
                                     machineIDToMachineType(in_msg.sender));
         }
         cache_entry.dirty := true;
+
+        cache_entry.modifiedInCurrentFetch := true;
     }
 
     action(upgStoreHit, desc="Upgrade store hit (was a miss)") {
@@ -730,6 +738,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
         sequencer.writeCallback(address, cache_entry.dataBlk, true,
                                 machineIDToMachineType(machineID));
         cache_entry.dirty := true;
+
+        cache_entry.modifiedInCurrentFetch := true;
     }
 
     // Actions on cache entry and TBE

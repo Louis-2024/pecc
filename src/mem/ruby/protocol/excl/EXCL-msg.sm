@@ -25,6 +25,7 @@ structure(RequestMsg, desc="Coherence request message", interface="Message") {
     bool                                writeback,                  desc="Indicator of writeback";
     DataBlock                           dataBlk,                    desc="Cache line data";
     bool                                dirty,                      desc="Dirty bit of the cache line";
+    bool                                modifiedInCurrentFetch,     desc="";
 
     bool functionalRead(Packet *pkt) {
         if (writeback)  {

@@ -93,6 +93,7 @@ class CacheMemory : public SimObject
     //   b) an unused line in the same cache "way"
     bool cacheAvail(Addr address) const;
     bool cleanCacheAvail(Addr address) const;
+    bool dirtyCacheAvail(Addr address) const;
 
     // Returns a NULL entry that acts as a placeholder for invalid lines
     AbstractCacheEntry*
@@ -114,7 +115,7 @@ class CacheMemory : public SimObject
     // Returns with the physical address of the conflicting cache line
     Addr cacheProbe(Addr address) const;
     Addr cleanCacheProbe(Addr address) const;
-  
+    Addr dirtyCacheProbe(Addr address) const;
 
     // looks an address up in the cache
     AbstractCacheEntry* lookup(Addr address);

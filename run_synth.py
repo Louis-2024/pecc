@@ -32,7 +32,10 @@ def generate_synth_command(protocol, ncore):
 
     command = (
         f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_trace_test.py "
-        f"--ruby --num-cpus {ncore} --l1d_size 16kB --l1i_size 16kB --l2_size 1024kB  --mem-type SimpleMemory --mem-size 8GB "
+        f"--ruby --num-cpus {ncore} "
+        f"--l1d_size 16kB --l1i_size 16kB --l2_size 2048kB "
+        f"--l1d_assoc 8 --l1i_assoc 8 --l2_assoc 16 "
+        f"--mem-type SimpleMemory --mem-size 8GB "
     )
     
     return (command, outdir, config)

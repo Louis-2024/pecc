@@ -378,6 +378,46 @@ CacheMemory::cleanCacheAvail(Addr address) const
     return false;
 }
 
+Addr
+CacheMemory::dirtyCacheProbe(Addr address) const
+{
+    assert(address == makeLineAddress(address));
+    assert(dirtyCacheAvail(address));
+    AbstractCacheEntry* victim_entry = nullptr;
+    Tick lastAccessTime = MaxTick;
+    int64_t cacheSet = addressToCacheSet(address);
+    for (int i = 0; i < m_cache_assoc; i++) {
+        AbstractCacheEntry* current_entry = m_cache[cacheSet][i];
+        if (current_entry == nullptr) {
+            continue;
+        }
+        if (current_entry->getDirty()) {
+            if (current_entry->getLastAccess() < lastAccessTime){
+                victim_entry = current_entry;
+                lastAccessTime = current_entry->getLastAccess();
+            }
+        }
+    }
+    assert(victim_entry != nullptr);
+    return victim_entry->m_Address;
+}
+
+bool
+CacheMemory::dirtyCacheAvail(Addr address) const
+{
+    int64_t cacheSet = addressToCacheSet(address);
+    for (int i = 0; i < m_cache_assoc; i++) {
+        AbstractCacheEntry* entry = m_cache[cacheSet][i];
+        if (entry == nullptr) {
+            continue;
+        }
+        if (entry->getDirty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // looks an address up in the cache
 AbstractCacheEntry*
 CacheMemory::lookup(Addr address)

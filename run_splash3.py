@@ -7,7 +7,7 @@ import tqdm
 from multiprocessing.pool import Pool
 
 
-def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB",  l1i_size="16kB", l1_assoc=8, llc_assoc=8, mem_size="1GB"):
+def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB",  l1i_size="16kB", l1_assoc=8, llc_assoc=16, mem_size="1GB"):
     gem5_home = "/gem5/pecc"
     splash3_dir = "/gem5/pecc/splash-3-static-link/codes"
     config = f"{program}_{protocol}_{ncore}_{llc_size}"
@@ -121,7 +121,7 @@ if __name__ == '__main__':
 
         for protocol in ['INCL', 'EXCL']:
             for core_count in [4]:
-                for llc_size in ['1024kB']:
+                for llc_size in ['2048kB']:
                     cmds.append(generate_splash3_command(program, protocol, core_count, llc_size, mem_size=mem_size))
 
     pool = Pool(31)  # Modify here to configure the number of cores to run the simulation
