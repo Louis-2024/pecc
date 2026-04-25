@@ -77,6 +77,16 @@ def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB"
         options=""
         stdin=f"{splash3_dir}/apps/fmm/inputs/input.{ncore}.16384"
         wkdir=f"{splash3_dir}/apps/fmm"
+    elif program == 'raytrace':
+        binary=f"{splash3_dir}/apps/raytrace/RAYTRACE"
+        options=f"-p{ncore} {splash3_dir}/apps/raytrace/inputs/teapot.env"
+        stdin=""
+        wkdir=f"{splash3_dir}/apps/raytrace"
+    elif program == 'radiosity':
+        binary=f"{splash3_dir}/apps/{program}/{program.upper()}"
+        options=f"-p {ncore} -ae 5000 -bf 0.1 -en 0.1 -room -batch"
+        stdin=""
+        wkdir=f"{splash3_dir}/apps/{program}"
     else:
         print("Unknown program")
         system.exit(-1)
@@ -110,12 +120,12 @@ if __name__ == '__main__':
     # Generate the commands to run Splash-3 benchmarks
     programs = ['cholesky', 'radix', 'fft', 'lu_contiguous', 'lu_non_contig', 
                 'ocean_contiguous', 'ocean_non_contig', 'fmm', 'barnes']
-                # 'water-nsquared', 'water-spatial', 'raytrace'] # heavyweight
+                # 'radiosity', 'water-nsquared', 'water-spatial', 'raytrace'] # heavyweight
 
     cmds = []
     for program in programs:
         if program == 'raytrace':
-            mem_size = '4GB'
+            mem_size = '2GB'
         else:
             mem_size = '1GB'
 
