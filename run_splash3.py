@@ -87,6 +87,11 @@ def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB"
         options=f"-p {ncore} -ae 5000 -bf 0.1 -en 0.1 -room -batch"
         stdin=""
         wkdir=f"{splash3_dir}/apps/{program}"
+    elif program == 'volrend':
+        binary = f"{splash3_dir}/apps/volrend/VOLREND"
+        options = f"{ncore} {splash3_dir}/apps/volrend/inputs/head-scaleddown2 4"
+        stdin = ""
+        wkdir = f"{splash3_dir}/apps/volrend"
     else:
         print("Unknown program")
         system.exit(-1)
@@ -118,9 +123,8 @@ def call_proc(args):
 
 if __name__ == '__main__':
     # Generate the commands to run Splash-3 benchmarks
-    programs = ['cholesky', 'radix', 'fft', 'lu_contiguous', 'lu_non_contig', 
-                'ocean_contiguous', 'ocean_non_contig', 'fmm', 'barnes']
-                # 'radiosity', 'water-nsquared', 'water-spatial', 'raytrace'] # heavyweight
+    programs = ['cholesky', 'radix',  'ocean_contiguous', 'ocean_non_contig', 'radiosity', 'raytrace', 'volrend'] # lightweight
+    # programs = ['fft', 'lu_contiguous', 'lu_non_contig', 'fmm', 'barnes', 'water-nsquared', 'water-spatial'] # heavyweight
 
     cmds = []
     for program in programs:

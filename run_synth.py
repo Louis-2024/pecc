@@ -12,30 +12,12 @@ def generate_synth_command(protocol, ncore):
     config = f"{protocol}-{ncore}"
     outdir = f"{gem5_home}/synth-out/{config}"
 
-    # if protocol == 'INCL':
-    #     command = (
-    #         f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_trace_test.py "
-    #         f"--ruby --num-cpus {ncore} --l1d_size 16kB --l1i_size 16kB --l2_size 1024kB  --mem-type SimpleMemory --mem-size 8GB "
-    #     )
-    # else:
-    #     command=(
-    #         f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_random_test.py "
-    #         f"--ruby --num-cpus {ncore} --l1d_size 256B --l1i_size 256B --l2_size 8192B --mem-type SimpleMemory --maxloads 10000 "
-    #     )
-
-    # command=(
-    #     f"{gem5_home}/build/X86_{protocol}/gem5.opt "
-    #     # f"--debug-flags=FlexLLC --debug-file=flexllc.log --debug-start=0 "
-    #     f"-d {outdir} {gem5_home}/configs/example/ruby_random_test.py "
-    #     f"--ruby --num-cpus {ncore} --l1d_size 256B --l1i_size 256B --l2_size 8192B --mem-type SimpleMemory --maxloads 100000 "
-    # )
-
     command = (
-        f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_trace_test.py "
+        f"{gem5_home}/build/X86_{protocol}/gem5.opt -d {outdir} {gem5_home}/configs/example/ruby_synth_test.py "
         f"--ruby --num-cpus {ncore} "
         f"--l1d_size 16kB --l1i_size 16kB --l2_size 2048kB "
         f"--l1d_assoc 8 --l1i_assoc 8 --l2_assoc 16 "
-        f"--mem-type SimpleMemory --mem-size 8GB "
+        f"--mem-type SimpleMemory --mem-size 1GB "
     )
     
     return (command, outdir, config)

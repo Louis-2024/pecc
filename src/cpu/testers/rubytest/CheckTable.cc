@@ -35,43 +35,106 @@
 #include "cpu/testers/rubytest/Check.hh"
 #include "debug/RubyTest.hh"
 
+#define DATA_SIZE 1048576
+
+constexpr uint32_t ChecksPerCacheLine = 16;
+constexpr uint32_t ApproxL1Lines = 1024;
+constexpr uint32_t ApproxL1Checks = ApproxL1Lines * ChecksPerCacheLine;
+
+constexpr uint32_t ShortReuseMinDistance = 1;
+constexpr uint32_t ShortReuseMaxDistance = 0.5 * ApproxL1Checks;
+constexpr uint32_t MidReuseMinDistance = 0.5 * ApproxL1Checks + 1;
+constexpr uint32_t MidReuseMaxDistance = 2 * ApproxL1Checks;
+constexpr uint32_t FarReuseMinDistance = 2 * ApproxL1Checks + 1;
+constexpr uint32_t FarReuseMaxDistance = 4 * ApproxL1Checks;
+constexpr uint32_t XFarReuseMinDistance = 4 * ApproxL1Checks + 1;
+constexpr uint32_t XFarReuseMaxDistance = 8 * ApproxL1Checks;
+constexpr uint32_t XXFarReuseMinDistance = 8 * ApproxL1Checks + 1;
+constexpr uint32_t XXFarReuseMaxDistance = 16 * ApproxL1Checks;
+
 namespace gem5
 {
+
+uint32_t pickPastIndex(uint32_t current_index, uint32_t total_checks, uint32_t min_distance, uint32_t max_distance)
+{
+    if (total_checks == 1) {
+        return 0;
+    }
+
+    uint32_t capped_max = max_distance;
+    if (capped_max >= total_checks) {
+        capped_max = total_checks - 1;
+    }
+
+    uint32_t capped_min = min_distance;
+    if (capped_min > capped_max) {
+        capped_min = capped_max;
+    }
+
+    uint32_t distance = random_mt.random<unsigned>(capped_min, capped_max);
+    return (current_index + total_checks - distance) % total_checks;
+}
 
 CheckTable::CheckTable(int _num_writers, int _num_readers, RubyTester* _tester)
     : m_num_writers(_num_writers), m_num_readers(_num_readers),
       m_tester_ptr(_tester)
 {
-    Addr physical = 0;
+    constexpr Addr BasePhysical = 0x100000;
+    constexpr Addr RegionGap = 0x100000;
+    constexpr Addr ConflictStride = 256;
 
-    const int size1 = 32;
-    const int size2 = 100;
+    const uint32_t target_checks = DATA_SIZE / CHECK_SIZE;
+    const uint32_t conflict_checks = target_checks / 8;
+    const uint32_t distributed_checks = target_checks - 2 * conflict_checks;
 
-    DPRINTF(RubyTest, "Adding false sharing checks\n");
-    // The first set is to get some false sharing
-    physical = 1000;
-    for (int i = 0; i < size1; i++) {
-        // Setup linear addresses
-        addCheck(physical);
-        physical += CHECK_SIZE;
-    }
+    m_check_vector.reserve(target_checks);
+    m_lookup_map.reserve(DATA_SIZE);
 
+    auto addUniqueCheck = [this](Addr address) {
+        const size_t old_size = m_check_vector.size();
+        addCheck(address);
+
+        if (m_check_vector.size() != old_size + 1) {
+            panic("Failed to add unique check at address %#x", address);
+        }
+    };
+
+    Addr physical = BasePhysical;
+    const Addr conflict_region_base = physical + RegionGap;
     DPRINTF(RubyTest, "Adding cache conflict checks\n");
-    // The next two sets are to get some limited false sharing and
-    // cache conflicts
-    physical = 1000;
-    for (int i = 0; i < size2; i++) {
-        // Setup linear addresses
-        addCheck(physical);
-        physical += 256;
+    physical = conflict_region_base;
+    for (uint32_t i = 0; i < conflict_checks; ++i) {
+        addUniqueCheck(physical);
+        physical += ConflictStride;
     }
 
     DPRINTF(RubyTest, "Adding cache conflict checks2\n");
-    physical = 1000 + CHECK_SIZE;
-    for (int i = 0; i < size2; i++) {
-        // Setup linear addresses
-        addCheck(physical);
-        physical += 256;
+    physical = conflict_region_base + CHECK_SIZE;
+    for (uint32_t i = 0; i < conflict_checks; ++i) {
+        addUniqueCheck(physical);
+        physical += ConflictStride;
+    }
+
+    DPRINTF(RubyTest, "Adding interleaved capacity checks\n");
+    const Addr distributed_base = conflict_region_base + (static_cast<Addr>(conflict_checks) * ConflictStride) + RegionGap;
+    const uint32_t stream_count = ChecksPerCacheLine;
+    const uint32_t rows = (distributed_checks + stream_count - 1) / stream_count;
+
+    for (uint32_t row = 0; row < rows; ++row) {
+        for (uint32_t stream = 0;
+             stream < stream_count && m_check_vector.size() < target_checks;
+             ++stream) {
+            const Addr address = distributed_base + CHECK_SIZE * (static_cast<Addr>(stream) * rows + row);
+            addUniqueCheck(address);
+        }
+    }
+
+    if (m_check_vector.size() != target_checks) {
+        panic("Expected %u checks, built %zu", target_checks, m_check_vector.size());
+    }
+
+    if (m_lookup_map.size() != DATA_SIZE) {
+        panic("Expected %u lookup-map entries, built %zu", DATA_SIZE, m_lookup_map.size());
     }
 }
 
@@ -113,8 +176,27 @@ CheckTable::addCheck(Addr address)
 Check*
 CheckTable::getRandomCheck()
 {
-    assert(m_check_vector.size() > 0);
-    return m_check_vector[random_mt.random<unsigned>(0, m_check_vector.size() - 1)];
+    uint32_t total_checks = m_check_vector.size();
+    uint32_t out_index = m_current_index;
+
+    if (m_current_index >= MidReuseMinDistance) {
+        float selection = random_mt.random<float>();
+
+        if (selection < 0.1f) {
+            out_index = pickPastIndex(m_current_index, total_checks, ShortReuseMinDistance, ShortReuseMaxDistance);
+        } else if (selection < 0.3f) {
+            out_index = pickPastIndex(m_current_index, total_checks, MidReuseMinDistance, MidReuseMaxDistance);
+        } else if (selection < 0.75f) {
+            out_index = pickPastIndex(m_current_index, total_checks, FarReuseMinDistance,FarReuseMaxDistance);
+        } else if (selection < 0.95f) {
+            out_index = pickPastIndex(m_current_index, total_checks, XFarReuseMinDistance, XFarReuseMaxDistance);
+        } else if (selection < 0.97f) {
+            out_index = pickPastIndex(m_current_index, total_checks, XXFarReuseMinDistance, XXFarReuseMaxDistance);
+        }
+    }
+
+    m_current_index = (m_current_index + 1) % total_checks;
+    return m_check_vector[out_index];
 }
 
 Check*
