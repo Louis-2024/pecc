@@ -119,6 +119,7 @@ structure (NetDest, external = "yes", non_obj="yes") {
   bool isEmpty();
   bool intersectionIsEmpty(Set);
   bool intersectionIsEmpty(NetDest);
+  MachineID randomElement();
   MachineID smallestElement();
   MachineID smallestElement(MachineType);
   NetDest OR(NetDest);

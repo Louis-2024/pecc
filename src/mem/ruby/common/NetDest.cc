@@ -29,6 +29,7 @@
 #include "mem/ruby/common/NetDest.hh"
 
 #include <algorithm>
+#include <cstdlib> 
 
 namespace gem5
 {
@@ -138,6 +139,27 @@ NodeID
 NetDest::elementAt(MachineID index)
 {
     return m_bits[vecIndex(index)].elementAt(bitIndex(index.num));
+}
+
+MachineID
+NetDest::randomElement() const
+{
+    int n = count();
+    assert(n > 0);
+    int target = rand() % n;
+
+    for (int i = 0; i < m_bits.size(); i++) {
+        for (NodeID j = 0; j < m_bits[i].getSize(); j++) {
+            if (m_bits[i].isElement(j)) {
+                if (target == 0) {
+                    MachineID mach = {MachineType_from_base_level(i), j};
+                    return mach;
+                }
+                target--;
+            }
+        }
+    }
+    panic("No random element of an empty set.");
 }
 
 MachineID

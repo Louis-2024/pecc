@@ -20,6 +20,9 @@ structure(RequestMsg, desc="Coherence request message", interface="Message") {
     MachineID                           requestor,                  desc="Requestor";
     NetDest                             Destination,                desc="Multicast destination mask";
     MessageSizeType                     MessageSize,                desc="size category of the message";
+    MachineID                           newOwner,                   desc="New owner";
+    NetDest                             holders,                    desc="All L1 caches that share the line in valid state";
+    int                                 operation,                  desc="1: writeback; 2: ownership transfer";
     DataBlock                           dataBlk,                    desc="Cache line data";
 
     bool functionalRead(Packet *pkt) {
