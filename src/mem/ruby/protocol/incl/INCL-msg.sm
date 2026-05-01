@@ -22,7 +22,7 @@ structure(RequestMsg, desc="Coherence request message", interface="Message") {
     MessageSizeType                     MessageSize,                desc="size category of the message";
     MachineID                           newOwner,                   desc="New owner";
     NetDest                             holders,                    desc="All L1 caches that share the line in valid state";
-    int                                 operation,                  desc="1: writeback; 2: ownership transfer";
+    int                                 operation,                  desc="1: writeback; 2: ownership transfer for MO; 3: ownership transfer for SO";
     DataBlock                           dataBlk,                    desc="Cache line data";
 
     bool functionalRead(Packet *pkt) {

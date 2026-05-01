@@ -46,8 +46,10 @@ machine(MachineType:L1Cache, "L1 Cache") :
     state_declaration(State, desc="Cache states", default="L1Cache_State_I") {
         // Stable states
         M, AccessPermission:Read_Write, desc="";
-        O, AccessPermission:Read_Only, desc="";
+        MO, AccessPermission:Read_Only, desc="Modified Own";
         S, AccessPermission:Read_Only, desc="";
+        SO, AccessPermission:Read_Only, desc="Shared Own";
+        E, AccessPermission:Read_Only, desc="";
         I, AccessPermission:Invalid, desc="";
 
         // Special stable state to support locked RMW atomic instruction
@@ -104,10 +106,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
         OtherGetS, desc="Observe other GetS";
         OtherUpg, desc="Observe other Upg";
         OtherPutS, desc="";
-        OtherPutOTransferred, desc="";
-        OtherPutONotTransferred, desc="";
+        OtherPutSOTransferred, desc="";
+        OtherPutSONotTransferred, desc="";
         OtherPutM, desc="";
-        
+        OtherPutMOTransferred, desc="";
+        OtherPutMONotTransferred, desc="";
+
         // Events triggered by receiving data response
         DataFromMem, desc="Data comes from memory";
         DataFromLLC, desc="Data comes from LLC";
@@ -236,12 +240,17 @@ machine(MachineType:L1Cache, "L1 Cache") :
         bool shared := (cache_entry.holders.count() > 1);
         if (owned) {
             if (modified && shared) {
-                return State:O;
+                return State:MO;
             }
             if (modified && !shared) {
                 return State:M;
             }
-            assert(false);
+            if (!modified && shared) {
+                return State:SO;
+            }
+            if (!modified && !shared) {
+                return State:E;
+            }
         }
         return State:S;
     }
@@ -418,11 +427,19 @@ machine(MachineType:L1Cache, "L1 Cache") :
                             trigger(Event:OtherPutM, in_msg.addr, cache_entry, tbe);
                         } else if (in_msg.operation == 2) {
                             if (in_msg.newOwner == machineID) {
-                                DPRINTF(FlexLLC, "(%s) (OtherPutOTransferred: Address = %#x, Current State = %s, Requestor = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                trigger(Event:OtherPutOTransferred, in_msg.addr, cache_entry, tbe);
+                                DPRINTF(FlexLLC, "(%s) (OtherPutMOTransferred: Address = %#x, Current State = %s, Requestor = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:OtherPutMOTransferred, in_msg.addr, cache_entry, tbe);
                             } else {
-                                DPRINTF(FlexLLC, "(%s) (OtherPutONotTransferred: Address = %#x, Current State = %s, Requestor = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                                trigger(Event:OtherPutONotTransferred, in_msg.addr, cache_entry, tbe);
+                                DPRINTF(FlexLLC, "(%s) (OtherPutMONotTransferred: Address = %#x, Current State = %s, Requestor = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:OtherPutMONotTransferred, in_msg.addr, cache_entry, tbe);
+                            }
+                        } else if (in_msg.operation == 3) {
+                            if (in_msg.newOwner == machineID) {
+                                DPRINTF(FlexLLC, "(%s) (OtherPutSOTransferred: Address = %#x, Current State = %s, Requestor = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:OtherPutSOTransferred, in_msg.addr, cache_entry, tbe);
+                            } else {
+                                DPRINTF(FlexLLC, "(%s) (OtherPutMONotTransferred: Address = %#x, Current State = %s, Requestor = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:OtherPutMONotTransferred, in_msg.addr, cache_entry, tbe);
                             }
                         } else {
                             DPRINTF(FlexLLC, "(%s) (OtherPutS: Address = %#x, Current State = %s, Requestor = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
@@ -614,6 +631,28 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
+    action(sendPutSO, desc="") {
+        assert(is_valid(tbe));
+        assert(is_valid(cache_entry));
+        cache_entry.holders.remove(machineID);
+        profiler.profilePutRequest();
+        tbe.reqID := curCycle();
+        enqueue(requestOutPort, RequestMsg, 1) {
+            out_msg.reqID := tbe.reqID;
+            out_msg.addr := address;
+            out_msg.type := CoherenceRequestType:Put;
+            out_msg.requestor := machineID;
+            out_msg.operation := 3;
+            out_msg.newOwner := cache_entry.holders.randomElement();
+            out_msg.holders := cache_entry.holders;
+            out_msg.Destination.clear();
+            out_msg.Destination.broadcast(MachineType:L1Cache);
+            out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
+                                    l2_select_low_bit, l2_select_num_bits, intToID(0)));
+            out_msg.MessageSize := MessageSizeType:Control;
+        }
+    }
+
     action(sendPutM, desc="") {
         assert(is_valid(tbe));
         assert(is_valid(cache_entry));
@@ -635,7 +674,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
-    action(sendPutO, desc="") {
+    action(sendPutMO, desc="") {
         assert(is_valid(tbe));
         assert(is_valid(cache_entry));
         cache_entry.holders.remove(machineID);
@@ -914,20 +953,28 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     // Actions: sanity check
-    action(assertTBEValid, desc="...") {
-        assert(is_valid(tbe));
+    action(assertOwned, desc="") {
+        assert(cache_entry.owned);
     }
 
-    action(assertTBEInvalid, desc="...") {
-        assert(is_invalid(tbe));
+    action(assertNotOwned, desc="") {
+        assert(!cache_entry.owned);
     }
 
-    action(assertCacheEntryValid, desc="...") {
-        assert(is_valid(cache_entry));
+    action(assertModified, desc="") {
+        assert(cache_entry.modified);
     }
 
-    action(assertCacheEntryInvalid, desc="...") {
-        assert(is_invalid(cache_entry));
+    action(assertNotModified, desc="") {
+        assert(!cache_entry.modified);
+    }
+
+    action(assertShared, desc="") {
+        assert(cache_entry.holders.count() > 1);
+    }
+
+    action(assertNotShared, desc="") {
+        assert(cache_entry.holders.count() == 1);
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -940,13 +987,13 @@ machine(MachineType:L1Cache, "L1 Cache") :
         deallocateCacheEntry;
     }
 
-    transition({M, O, S}, Replacement) {
+    transition({M, MO, S, SO, E}, Replacement) {
         allocateTBE;
         initiateReplacement;
         sendBusRequest;
     }
 
-    transition({M, O, S}, {Ifetch, Load}) {
+    transition({M, MO, S, SO, E}, {Ifetch, Load}) {
         loadHit;
         popMandatoryQueue;
     }
@@ -990,14 +1037,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popMandatoryQueue;
     }
 
-    transition({S, O}, Store) {
+    transition({S, SO, MO, E}, Store) {
         allocateTBE;
         initiateGetM;
         sendBusRequest;
         popMandatoryQueue;
     }
 
-    transition({S, O}, Lock) {
+    transition({S, SO, MO, E}, Lock) {
         allocateTBE;
         initiateGetMLocked;
         sendBusRequest;
@@ -1013,7 +1060,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     // Transition on observing other coherence request in stable states
 
-    transition({I, I_D}, {OtherGetM, OtherGetS, OtherUpg, OtherPutS, OtherPutONotTransferred, OtherPutOTransferred, OtherPutM}) {
+    transition({I, I_D}, {OtherGetM, OtherGetS, OtherUpg, OtherPutS, OtherPutSONotTransferred, OtherPutSOTransferred, OtherPutM, OtherPutMONotTransferred, OtherPutMOTransferred}) {
         popRequestQueue;
     }
 
@@ -1031,11 +1078,18 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition(S, {OtherPutS, OtherPutONotTransferred}) {
+    transition(S, {OtherPutS, OtherPutSONotTransferred, OtherPutMONotTransferred}) {
         popRequestQueue;
     }
 
-    transition(S, OtherPutOTransferred, CMP) {
+    transition(S, OtherPutSOTransferred, CMP) {
+        setOwned;
+        copyHolderFromPut;
+        popRequestQueue;
+        triggerRemoteReqCompletion;
+    }
+
+    transition(S, OtherPutMOTransferred, CMP) {
         setOwned;
         setModified;
         copyHolderFromPut;
@@ -1043,7 +1097,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerRemoteReqCompletion;
     }
 
-    transition(M, OtherGetS, O) {
+    transition(M, OtherGetS, MO) {
         addHolder;
         sendDataResponse;
         popRequestQueue;
@@ -1055,24 +1109,30 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition(O, OtherGetS) {
+    transition({SO, MO}, OtherGetS) {
         addHolder;
         sendDataResponse;
         popRequestQueue;
     }
 
-    transition(O, OtherGetM, I) {
+    transition(E, OtherGetS, SO) {
+        addHolder;
+        sendDataResponse;
+        popRequestQueue;
+    }
+
+    transition({SO, MO, E}, OtherGetM, I) {
         sendDataResponse;
         invalidateCacheEntry;
         popRequestQueue;
     }
 
-    transition(O, OtherUpg, I) {
+    transition({SO, MO}, OtherUpg, I) {
         invalidateCacheEntry;
         popRequestQueue;
     }
 
-    transition(O, OtherPutS, CMP) {
+    transition({SO, MO}, OtherPutS, CMP) {
         removeHolder;
         popRequestQueue;
         triggerRemoteReqCompletion;
@@ -1102,11 +1162,18 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition(S_D, OtherPutONotTransferred) {
+    transition(S_D, {OtherPutSONotTransferred, OtherPutMONotTransferred}) {
         popRequestQueue;
     }
 
-    transition(S_D, OtherPutOTransferred) {
+    transition(S_D, OtherPutSOTransferred) {
+        setOwned;
+        clearRequestor;
+        copyHolderFromPut; 
+        popRequestQueue;
+    }
+
+    transition(S_D, OtherPutMOTransferred) {
         setOwned;
         setModified;
         clearRequestor;
@@ -1148,23 +1215,28 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popBusGrantQueue;
     }
 
-    transition({S, O}, BusGrantDoGetM, M_A) {
+    transition({S, SO, MO, E}, BusGrantDoGetM, M_A) {
         sendUpg;
         popBusGrantQueue;
     }
 
-    transition({S, O}, BusGrantDoGetMLocked, ML_A) {
+    transition({S, SO, MO, E}, BusGrantDoGetMLocked, ML_A) {
         sendUpg;
         popBusGrantQueue;
     }
 
-    transition(S, BusGrantDoPut, I_A) {
+    transition({S, E}, BusGrantDoPut, I_A) {
         sendPutS;
         popBusGrantQueue;
     }
 
-    transition(O, BusGrantDoPut, I_A) {
-        sendPutO;
+    transition(SO, BusGrantDoPut, I_A) {
+        sendPutSO;
+        popBusGrantQueue;
+    }
+
+    transition(MO, BusGrantDoPut, I_A) {
+        sendPutMO;
         popBusGrantQueue;
     }
 
@@ -1242,14 +1314,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerLocalReqCompletion;
     }
 
-    transition(S_D, {DataFromLLC, DataCacheToCache}, CMP) {
+    transition(S_D, DataCacheToCache, CMP) {
         writeDataResponseToCache;
         externalLoadHit;
         popResponseQueue;
         triggerLocalReqCompletion;
     }
 
-    transition(S_D, DataFromMem, CMP) {
+    transition(S_D, {DataFromLLC, DataFromMem}, CMP) {
+        setOwned;
         writeDataResponseToCache;
         externalLoadHit;
         popResponseQueue;
