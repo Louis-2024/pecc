@@ -34,6 +34,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "base/random.hh"
 #include "mem/ruby/common/Address.hh"
 
 namespace gem5
@@ -45,7 +46,7 @@ class RubyTester;
 class CheckTable
 {
   public:
-    CheckTable(int _num_writers, int _num_readers, RubyTester* _tester);
+    CheckTable(int _num_writers, int _num_readers, RubyTester* _tester, uint32_t _random_seed);
     ~CheckTable();
 
     Check* getRandomCheck();
@@ -73,6 +74,7 @@ class CheckTable
     int m_num_writers;
     int m_num_readers;
     RubyTester* m_tester_ptr;
+    Random m_rng;
 };
 
 inline std::ostream&

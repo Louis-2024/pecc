@@ -64,6 +64,7 @@ RubyTester::RubyTester(const Params &p)
     m_num_writers(0),
     m_num_readers(0),
     m_wakeup_frequency(p.wakeup_frequency),
+    m_random_seed(p.random_seed),
     m_check_flush(p.check_flush),
     m_num_inst_only_ports(p.port_cpuInstPort_connection_count),
     m_num_inst_data_ports(p.port_cpuInstDataPort_connection_count)
@@ -128,7 +129,8 @@ RubyTester::init()
     m_num_readers = readPorts.size();
     assert(m_num_readers == m_num_cpus);
 
-    m_checkTable_ptr = new CheckTable(m_num_writers, m_num_readers, this);
+    m_checkTable_ptr = new CheckTable(m_num_writers, m_num_readers, this,
+                                      m_random_seed);
 }
 
 Port &

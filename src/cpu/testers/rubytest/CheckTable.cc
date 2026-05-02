@@ -55,7 +55,7 @@ constexpr uint32_t XXFarReuseMaxDistance = 16 * ApproxL1Checks;
 namespace gem5
 {
 
-uint32_t pickPastIndex(uint32_t current_index, uint32_t total_checks, uint32_t min_distance, uint32_t max_distance)
+uint32_t pickPastIndex(Random &rng, uint32_t current_index, uint32_t total_checks, uint32_t min_distance, uint32_t max_distance)
 {
     if (total_checks == 1) {
         return 0;
@@ -71,13 +71,13 @@ uint32_t pickPastIndex(uint32_t current_index, uint32_t total_checks, uint32_t m
         capped_min = capped_max;
     }
 
-    uint32_t distance = random_mt.random<unsigned>(capped_min, capped_max);
+    uint32_t distance = rng.random<unsigned>(capped_min, capped_max);
     return (current_index + total_checks - distance) % total_checks;
 }
 
-CheckTable::CheckTable(int _num_writers, int _num_readers, RubyTester* _tester)
+CheckTable::CheckTable(int _num_writers, int _num_readers, RubyTester* _tester, uint32_t _random_seed)
     : m_num_writers(_num_writers), m_num_readers(_num_readers),
-      m_tester_ptr(_tester)
+      m_tester_ptr(_tester), m_rng(_random_seed)
 {
     constexpr Addr BasePhysical = 0x100000;
     constexpr Addr RegionGap = 0x100000;
@@ -180,18 +180,18 @@ CheckTable::getRandomCheck()
     uint32_t out_index = m_current_index;
 
     if (m_current_index >= MidReuseMinDistance) {
-        float selection = random_mt.random<float>();
+        float selection = m_rng.random<float>();
 
         if (selection < 0.1f) {
-            out_index = pickPastIndex(m_current_index, total_checks, ShortReuseMinDistance, ShortReuseMaxDistance);
+            out_index = pickPastIndex(m_rng, m_current_index, total_checks, ShortReuseMinDistance, ShortReuseMaxDistance);
         } else if (selection < 0.3f) {
-            out_index = pickPastIndex(m_current_index, total_checks, MidReuseMinDistance, MidReuseMaxDistance);
+            out_index = pickPastIndex(m_rng, m_current_index, total_checks, MidReuseMinDistance, MidReuseMaxDistance);
         } else if (selection < 0.75f) {
-            out_index = pickPastIndex(m_current_index, total_checks, FarReuseMinDistance,FarReuseMaxDistance);
+            out_index = pickPastIndex(m_rng, m_current_index, total_checks, FarReuseMinDistance, FarReuseMaxDistance);
         } else if (selection < 0.95f) {
-            out_index = pickPastIndex(m_current_index, total_checks, XFarReuseMinDistance, XFarReuseMaxDistance);
+            out_index = pickPastIndex(m_rng, m_current_index, total_checks, XFarReuseMinDistance, XFarReuseMaxDistance);
         } else if (selection < 0.97f) {
-            out_index = pickPastIndex(m_current_index, total_checks, XXFarReuseMinDistance, XXFarReuseMaxDistance);
+            out_index = pickPastIndex(m_rng, m_current_index, total_checks, XXFarReuseMinDistance, XXFarReuseMaxDistance);
         }
     }
 

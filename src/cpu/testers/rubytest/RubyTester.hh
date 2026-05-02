@@ -147,6 +147,7 @@ class RubyTester : public ClockedObject
     int m_num_writers;
     int m_num_readers;
     int m_wakeup_frequency;
+    uint32_t m_random_seed;
     bool m_check_flush;
     int m_num_inst_only_ports;
     int m_num_inst_data_ports;
