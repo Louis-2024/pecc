@@ -53,7 +53,7 @@ now: I'm using 42 bits as in the Power4,
 since that's bigger then the 36 bits on the Pentium 4
 and 40 bits on the Opteron
 */
-const int ADDRESS_BITS = 42;
+const int ADDRESS_BITS = 32;
 
 /*dt: In addition to the tag bits, the tags also include 1 valid bit, 1 dirty bit, 2 bits for a 4-state
   cache coherency protocoll (MESI), 1 bit for MRU (change this to log(ways) for full LRU).
