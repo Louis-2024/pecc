@@ -38,21 +38,21 @@
 #define DATA_SIZE (1048576 * CHECK_SIZE)
 
 constexpr uint32_t ChecksPerCacheLine = 16;
-constexpr uint32_t ChecksUnit = 2048;
+constexpr uint32_t ChecksUnit = 4096;
 
 constexpr uint32_t XShortReuseMinDistance = 1;
 constexpr uint32_t XShortReuseMaxDistance = 4 * ChecksUnit;
 
-constexpr uint32_t ShortReuseMinDistance = 2 * ChecksUnit + 1;
+constexpr uint32_t ShortReuseMinDistance = 4 * ChecksUnit + 1;
 constexpr uint32_t ShortReuseMaxDistance = 8 * ChecksUnit;
 
-constexpr uint32_t MidReuseMinDistance = 4 * ChecksUnit + 1;
+constexpr uint32_t MidReuseMinDistance = 8 * ChecksUnit + 1;
 constexpr uint32_t MidReuseMaxDistance = 16 * ChecksUnit;
 
-constexpr uint32_t FarReuseMinDistance = 8 * ChecksUnit + 1;
+constexpr uint32_t FarReuseMinDistance = 16 * ChecksUnit + 1;
 constexpr uint32_t FarReuseMaxDistance = 32 * ChecksUnit;
 
-constexpr uint32_t XFarReuseMinDistance = 16 * ChecksUnit + 1;
+constexpr uint32_t XFarReuseMinDistance = 32 * ChecksUnit + 1;
 constexpr uint32_t XFarReuseMaxDistance = 64 * ChecksUnit;
 
 namespace gem5
@@ -158,41 +158,37 @@ CheckTable::getRandomCheck()
     uint32_t history_size = m_access_history_vector.size();
     uint32_t out_index = history_size % m_check_vector.size();
 
-    if (m_access_history_vector.size() >= FarReuseMinDistance) {
+    if (m_access_history_vector.size() >= MidReuseMinDistance) {
         float random1 = m_rng.random<float>();
         float random2 = m_rng.random<float>();
-        bool readNewData = false;
 
-        // randomization 1: pick reuse distance
-        if (random1 < 0.3f) {
-            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, XShortReuseMinDistance, XShortReuseMaxDistance)];
-        } else if (random1 < 0.6f) {
-            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, ShortReuseMinDistance, ShortReuseMaxDistance)];
+        uint32_t hotspotIndex1 = 20;
+        uint32_t hotspotIndex2 = 10;
+        uint32_t hotspotIndex3 = 5;
+
+        if (random1 < 0.1f) {
+            out_index = pickPastIndex(m_rng, history_size, XShortReuseMinDistance, XShortReuseMaxDistance);
+        } else if (random1 < 0.2f) {
+            out_index = pickPastIndex(m_rng, history_size, ShortReuseMinDistance, ShortReuseMaxDistance);
+        } else if (random1 < 0.4f) {
+            out_index = pickPastIndex(m_rng, history_size, MidReuseMinDistance, MidReuseMaxDistance);
         } else if (random1 < 0.8f) {
-            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, MidReuseMinDistance, MidReuseMaxDistance)];
+            out_index = pickPastIndex(m_rng, history_size, FarReuseMinDistance, FarReuseMaxDistance);
         } else if (random1 < 0.9f) {
-            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, FarReuseMinDistance, FarReuseMaxDistance)];
-        } else if (random1 < 0.95f) {
-            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, XFarReuseMinDistance, XFarReuseMaxDistance)];
-        } else {
-            readNewData = true;
+            out_index = pickPastIndex(m_rng, history_size, XFarReuseMinDistance, XFarReuseMaxDistance);
         }
 
-        // randomization 2: create reuse hotspot
-        uint32_t hotspotIndex1 = 16;
-        uint32_t hotspotIndex2 = 8;
-        uint32_t hotspotIndex3 = 4;
-        if (!readNewData) {
-            if (random2 < 0.1f) {
-                out_index = (int) (out_index / hotspotIndex1) * hotspotIndex1;
-            } else if (random2 < 0.2f) {
-                out_index = (int) (out_index / hotspotIndex2) * hotspotIndex2;
-            } else if (random2 < 0.3f) {
-                out_index = (int) (out_index / hotspotIndex3) * hotspotIndex3;
-            }
+        if (random1 < 0.9f) {
+            // if (random2 < 0.2f) {
+            //     out_index = (int) (out_index / hotspotIndex1) * hotspotIndex1;
+            // } else if (random2 < 0.4f) {
+            //     out_index = (int) (out_index / hotspotIndex2) * hotspotIndex2;
+            // } else if (random2 < 0.6f) {
+            //     out_index = (int) (out_index / hotspotIndex3) * hotspotIndex3;
+            // }
+            out_index = m_access_history_vector[out_index];
         }
     }
-
     m_access_history_vector.push_back(out_index);
     return m_check_vector[out_index];
 }
