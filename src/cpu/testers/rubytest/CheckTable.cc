@@ -35,35 +35,34 @@
 #include "cpu/testers/rubytest/Check.hh"
 #include "debug/RubyTest.hh"
 
-#define DATA_SIZE 1048576
+#define DATA_SIZE (1048576 * CHECK_SIZE)
 
 constexpr uint32_t ChecksPerCacheLine = 16;
-constexpr uint32_t ApproxL1Lines = 1024;
-constexpr uint32_t ApproxL1Checks = ApproxL1Lines * ChecksPerCacheLine;
+constexpr uint32_t ChecksUnit = 2048;
 
-constexpr uint32_t ShortReuseMinDistance = 1;
-constexpr uint32_t ShortReuseMaxDistance = 0.5 * ApproxL1Checks;
-constexpr uint32_t MidReuseMinDistance = 0.5 * ApproxL1Checks + 1;
-constexpr uint32_t MidReuseMaxDistance = 2 * ApproxL1Checks;
-constexpr uint32_t FarReuseMinDistance = 2 * ApproxL1Checks + 1;
-constexpr uint32_t FarReuseMaxDistance = 4 * ApproxL1Checks;
-constexpr uint32_t XFarReuseMinDistance = 4 * ApproxL1Checks + 1;
-constexpr uint32_t XFarReuseMaxDistance = 8 * ApproxL1Checks;
-constexpr uint32_t XXFarReuseMinDistance = 8 * ApproxL1Checks + 1;
-constexpr uint32_t XXFarReuseMaxDistance = 16 * ApproxL1Checks;
+constexpr uint32_t XShortReuseMinDistance = 1;
+constexpr uint32_t XShortReuseMaxDistance = 4 * ChecksUnit;
+
+constexpr uint32_t ShortReuseMinDistance = 2 * ChecksUnit + 1;
+constexpr uint32_t ShortReuseMaxDistance = 8 * ChecksUnit;
+
+constexpr uint32_t MidReuseMinDistance = 4 * ChecksUnit + 1;
+constexpr uint32_t MidReuseMaxDistance = 16 * ChecksUnit;
+
+constexpr uint32_t FarReuseMinDistance = 8 * ChecksUnit + 1;
+constexpr uint32_t FarReuseMaxDistance = 32 * ChecksUnit;
+
+constexpr uint32_t XFarReuseMinDistance = 16 * ChecksUnit + 1;
+constexpr uint32_t XFarReuseMaxDistance = 64 * ChecksUnit;
 
 namespace gem5
 {
 
-uint32_t pickPastIndex(Random &rng, uint32_t current_index, uint32_t total_checks, uint32_t min_distance, uint32_t max_distance)
+uint32_t pickPastIndex(Random &rng, uint32_t history_size, uint32_t min_distance, uint32_t max_distance)
 {
-    if (total_checks == 1) {
-        return 0;
-    }
-
     uint32_t capped_max = max_distance;
-    if (capped_max >= total_checks) {
-        capped_max = total_checks - 1;
+    if (capped_max >= history_size) {
+        capped_max = history_size;
     }
 
     uint32_t capped_min = min_distance;
@@ -72,7 +71,7 @@ uint32_t pickPastIndex(Random &rng, uint32_t current_index, uint32_t total_check
     }
 
     uint32_t distance = rng.random<unsigned>(capped_min, capped_max);
-    return (current_index + total_checks - distance) % total_checks;
+    return (history_size - distance);
 }
 
 CheckTable::CheckTable(int _num_writers, int _num_readers, RubyTester* _tester, uint32_t _random_seed)
@@ -80,12 +79,16 @@ CheckTable::CheckTable(int _num_writers, int _num_readers, RubyTester* _tester, 
       m_tester_ptr(_tester), m_rng(_random_seed)
 {
     constexpr Addr BasePhysical = 0x100000;
-    constexpr Addr RegionGap = 0x100000;
-    constexpr Addr ConflictStride = 256;
+    constexpr Addr BlockSize = 64;
+
+    const uint32_t index = 16;
+
+    const uint32_t numberOfRows = index * BlockSize / CHECK_SIZE;
+    const uint32_t rowSize = CHECK_SIZE;
+    const uint32_t numberOfCols = DATA_SIZE / (BlockSize * index);
+    const uint32_t colSize = index * BlockSize;
 
     const uint32_t target_checks = DATA_SIZE / CHECK_SIZE;
-    const uint32_t conflict_checks = target_checks / 8;
-    const uint32_t distributed_checks = target_checks - 2 * conflict_checks;
 
     m_check_vector.reserve(target_checks);
     m_lookup_map.reserve(DATA_SIZE);
@@ -93,38 +96,14 @@ CheckTable::CheckTable(int _num_writers, int _num_readers, RubyTester* _tester, 
     auto addUniqueCheck = [this](Addr address) {
         const size_t old_size = m_check_vector.size();
         addCheck(address);
-
         if (m_check_vector.size() != old_size + 1) {
             panic("Failed to add unique check at address %#x", address);
         }
     };
 
-    Addr physical = BasePhysical;
-    const Addr conflict_region_base = physical + RegionGap;
-    DPRINTF(RubyTest, "Adding cache conflict checks\n");
-    physical = conflict_region_base;
-    for (uint32_t i = 0; i < conflict_checks; ++i) {
-        addUniqueCheck(physical);
-        physical += ConflictStride;
-    }
-
-    DPRINTF(RubyTest, "Adding cache conflict checks2\n");
-    physical = conflict_region_base + CHECK_SIZE;
-    for (uint32_t i = 0; i < conflict_checks; ++i) {
-        addUniqueCheck(physical);
-        physical += ConflictStride;
-    }
-
-    DPRINTF(RubyTest, "Adding interleaved capacity checks\n");
-    const Addr distributed_base = conflict_region_base + (static_cast<Addr>(conflict_checks) * ConflictStride) + RegionGap;
-    const uint32_t stream_count = ChecksPerCacheLine;
-    const uint32_t rows = (distributed_checks + stream_count - 1) / stream_count;
-
-    for (uint32_t row = 0; row < rows; ++row) {
-        for (uint32_t stream = 0;
-             stream < stream_count && m_check_vector.size() < target_checks;
-             ++stream) {
-            const Addr address = distributed_base + CHECK_SIZE * (static_cast<Addr>(stream) * rows + row);
+    for (uint32_t row = 0; row < numberOfRows; row++) {
+        for (uint32_t col = 0; col < numberOfCols; col++) {
+            const Addr address = BasePhysical + static_cast<Addr>(col) * colSize + static_cast<Addr>(row) * rowSize;
             addUniqueCheck(address);
         }
     }
@@ -176,26 +155,45 @@ CheckTable::addCheck(Addr address)
 Check*
 CheckTable::getRandomCheck()
 {
-    uint32_t total_checks = m_check_vector.size();
-    uint32_t out_index = m_current_index;
+    uint32_t history_size = m_access_history_vector.size();
+    uint32_t out_index = history_size % m_check_vector.size();
 
-    if (m_current_index >= MidReuseMinDistance) {
-        float selection = m_rng.random<float>();
+    if (m_access_history_vector.size() >= FarReuseMinDistance) {
+        float random1 = m_rng.random<float>();
+        float random2 = m_rng.random<float>();
+        bool readNewData = false;
 
-        if (selection < 0.1f) {
-            out_index = pickPastIndex(m_rng, m_current_index, total_checks, ShortReuseMinDistance, ShortReuseMaxDistance);
-        } else if (selection < 0.3f) {
-            out_index = pickPastIndex(m_rng, m_current_index, total_checks, MidReuseMinDistance, MidReuseMaxDistance);
-        } else if (selection < 0.75f) {
-            out_index = pickPastIndex(m_rng, m_current_index, total_checks, FarReuseMinDistance, FarReuseMaxDistance);
-        } else if (selection < 0.95f) {
-            out_index = pickPastIndex(m_rng, m_current_index, total_checks, XFarReuseMinDistance, XFarReuseMaxDistance);
-        } else if (selection < 0.97f) {
-            out_index = pickPastIndex(m_rng, m_current_index, total_checks, XXFarReuseMinDistance, XXFarReuseMaxDistance);
+        // randomization 1: pick reuse distance
+        if (random1 < 0.3f) {
+            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, XShortReuseMinDistance, XShortReuseMaxDistance)];
+        } else if (random1 < 0.6f) {
+            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, ShortReuseMinDistance, ShortReuseMaxDistance)];
+        } else if (random1 < 0.8f) {
+            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, MidReuseMinDistance, MidReuseMaxDistance)];
+        } else if (random1 < 0.9f) {
+            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, FarReuseMinDistance, FarReuseMaxDistance)];
+        } else if (random1 < 0.95f) {
+            out_index = m_access_history_vector[pickPastIndex(m_rng, history_size, XFarReuseMinDistance, XFarReuseMaxDistance)];
+        } else {
+            readNewData = true;
+        }
+
+        // randomization 2: create reuse hotspot
+        uint32_t hotspotIndex1 = 16;
+        uint32_t hotspotIndex2 = 8;
+        uint32_t hotspotIndex3 = 4;
+        if (!readNewData) {
+            if (random2 < 0.1f) {
+                out_index = (int) (out_index / hotspotIndex1) * hotspotIndex1;
+            } else if (random2 < 0.2f) {
+                out_index = (int) (out_index / hotspotIndex2) * hotspotIndex2;
+            } else if (random2 < 0.3f) {
+                out_index = (int) (out_index / hotspotIndex3) * hotspotIndex3;
+            }
         }
     }
 
-    m_current_index = (m_current_index + 1) % total_checks;
+    m_access_history_vector.push_back(out_index);
     return m_check_vector[out_index];
 }
 

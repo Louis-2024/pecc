@@ -68,8 +68,7 @@ class CheckTable
 
     std::vector<Check*> m_check_vector;
     std::unordered_map<Addr, Check*> m_lookup_map;
-
-    uint32_t m_current_index = 0;
+    std::vector<uint32_t> m_access_history_vector;
 
     int m_num_writers;
     int m_num_readers;
