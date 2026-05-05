@@ -53,6 +53,7 @@ Check::Check(Addr address, Addr pc, int _num_writers, int _num_readers,
     m_access_mode = ruby::RubyAccessMode(
         random_mt.random(0, ruby::RubyAccessMode_NUM - 1));
     m_store_count = 0;
+    m_index = -1;
 }
 
 void
@@ -60,11 +61,6 @@ Check::initiate()
 {
     DPRINTF(RubyTest, "initiating\n");
     debugPrint();
-
-    // currently no protocols support prefetches
-    if (false && (random_mt.random(0, 0xf) == 0)) {
-        initiatePrefetch(); // Prefetch from random processor
-    }
 
     if (m_tester_ptr->getCheckFlush() && (random_mt.random(0, 0xff) == 0)) {
         initiateFlush(); // issue a Flush request from random processor
@@ -82,69 +78,12 @@ Check::initiate()
 }
 
 void
-Check::initiatePrefetch()
-{
-    DPRINTF(RubyTest, "initiating prefetch\n");
-
-    int index = random_mt.random(0, m_num_readers - 1);
-    RequestPort* port = m_tester_ptr->getReadableCpuPort(index);
-
-    Request::Flags flags;
-    flags.set(Request::PREFETCH);
-
-    Packet::Command cmd;
-
-    // 1 in 8 chance this will be an exclusive prefetch
-    if (random_mt.random(0, 0x7) != 0) {
-        cmd = MemCmd::ReadReq;
-
-        // if necessary, make the request an instruction fetch
-        if (m_tester_ptr->isInstOnlyCpuPort(index) ||
-            (m_tester_ptr->isInstDataCpuPort(index) &&
-             (random_mt.random(0, 0x1)))) {
-            flags.set(Request::INST_FETCH);
-        }
-    } else {
-        cmd = MemCmd::WriteReq;
-        flags.set(Request::PF_EXCLUSIVE);
-    }
-
-    // Prefetches are assumed to be 0 sized
-    RequestPtr req = std::make_shared<Request>(
-            m_address, 0, flags, m_tester_ptr->requestorId());
-    req->setPC(m_pc);
-    req->setContext(index);
-
-    PacketPtr pkt = new Packet(req, cmd);
-    // despite the oddity of the 0 size (questionable if this should
-    // even be allowed), a prefetch is still a read and as such needs
-    // a place to store the result
-    uint8_t *data = new uint8_t[1];
-    pkt->dataDynamic(data);
-
-    // push the subblock onto the sender state.  The sequencer will
-    // update the subblock on the return
-    pkt->senderState = new SenderState(m_address, req->getSize());
-
-    if (port->sendTimingReq(pkt)) {
-        DPRINTF(RubyTest, "successfully initiated prefetch.\n");
-    } else {
-        // If the packet did not issue, must delete
-        delete pkt->senderState;
-        delete pkt;
-
-        DPRINTF(RubyTest,
-                "prefetch initiation failed because Port was busy.\n");
-    }
-}
-
-void
 Check::initiateFlush()
 {
 
     DPRINTF(RubyTest, "initiating Flush\n");
 
-    int index = random_mt.random(0, m_num_writers - 1);
+    int index = (m_index == -1) ? random_mt.random(0, m_num_writers - 1) : m_index;
     RequestPort* port = m_tester_ptr->getWritableCpuPort(index);
 
     Request::Flags flags;
@@ -174,7 +113,7 @@ Check::initiateAction()
     DPRINTF(RubyTest, "initiating Action\n");
     assert(m_status == ruby::TesterStatus_Idle);
 
-    int index = random_mt.random(0, m_num_writers - 1);
+    int index = (m_index == -1) ? random_mt.random(0, m_num_writers - 1) : m_index;
     RequestPort* port = m_tester_ptr->getWritableCpuPort(index);
 
     Request::Flags flags;
@@ -235,7 +174,7 @@ Check::initiateCheck()
     DPRINTF(RubyTest, "Initiating Check\n");
     assert(m_status == ruby::TesterStatus_Ready);
 
-    int index = random_mt.random(0, m_num_readers - 1);
+    int index = (m_index == -1) ? random_mt.random(0, m_num_readers - 1) : m_index;
     RequestPort* port = m_tester_ptr->getReadableCpuPort(index);
 
     Request::Flags flags;

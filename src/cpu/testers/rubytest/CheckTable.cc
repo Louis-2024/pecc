@@ -40,7 +40,7 @@
 constexpr uint32_t ChecksPerCacheLine = 16;
 constexpr uint32_t ChecksUnit = 4096;
 
-constexpr uint32_t XShortReuseMinDistance = 1;
+constexpr uint32_t XShortReuseMinDistance = 2 * ChecksUnit;
 constexpr uint32_t XShortReuseMaxDistance = 4 * ChecksUnit;
 
 constexpr uint32_t ShortReuseMinDistance = 4 * ChecksUnit + 1;
@@ -92,6 +92,7 @@ CheckTable::CheckTable(int _num_writers, int _num_readers, RubyTester* _tester, 
 
     m_check_vector.reserve(target_checks);
     m_lookup_map.reserve(DATA_SIZE);
+    m_access_history_by_core.resize(m_num_readers);
 
     auto addUniqueCheck = [this](Addr address) {
         const size_t old_size = m_check_vector.size();
@@ -155,41 +156,49 @@ CheckTable::addCheck(Addr address)
 Check*
 CheckTable::getRandomCheck()
 {
-    uint32_t history_size = m_access_history_vector.size();
+    const uint32_t coreCycleSize = 16384;
+    
+    uint32_t history_size = m_access_history.size();
     uint32_t out_index = history_size % m_check_vector.size();
 
-    if (m_access_history_vector.size() >= MidReuseMinDistance) {
-        float random1 = m_rng.random<float>();
+    // random1: pick core
+    float random1 = m_rng.random<float>();
+    int core_index = (random1 < 0.8f)? (history_size / coreCycleSize) % m_num_readers : m_rng.random(0, m_num_readers - 1);
+
+    // random2: pick reuse distance
+    if (m_access_history.size() >= MidReuseMinDistance) {
         float random2 = m_rng.random<float>();
-
-        uint32_t hotspotIndex1 = 20;
-        uint32_t hotspotIndex2 = 10;
-        uint32_t hotspotIndex3 = 5;
-
-        if (random1 < 0.1f) {
+        if (random2 < 0.1f) {
             out_index = pickPastIndex(m_rng, history_size, XShortReuseMinDistance, XShortReuseMaxDistance);
-        } else if (random1 < 0.2f) {
+        } else if (random2 < 0.2f) {
             out_index = pickPastIndex(m_rng, history_size, ShortReuseMinDistance, ShortReuseMaxDistance);
-        } else if (random1 < 0.4f) {
+        } else if (random2 < 0.4f) {
             out_index = pickPastIndex(m_rng, history_size, MidReuseMinDistance, MidReuseMaxDistance);
-        } else if (random1 < 0.8f) {
+        } else if (random2 < 0.8f) {
             out_index = pickPastIndex(m_rng, history_size, FarReuseMinDistance, FarReuseMaxDistance);
-        } else if (random1 < 0.9f) {
+        } else if (random2 < 0.95f) {
             out_index = pickPastIndex(m_rng, history_size, XFarReuseMinDistance, XFarReuseMaxDistance);
         }
 
-        if (random1 < 0.9f) {
-            // if (random2 < 0.2f) {
-            //     out_index = (int) (out_index / hotspotIndex1) * hotspotIndex1;
-            // } else if (random2 < 0.4f) {
-            //     out_index = (int) (out_index / hotspotIndex2) * hotspotIndex2;
-            // } else if (random2 < 0.6f) {
-            //     out_index = (int) (out_index / hotspotIndex3) * hotspotIndex3;
-            // }
-            out_index = m_access_history_vector[out_index];
+        if (random2 < 0.95f) {
+            // random3: pick from global reuse history or per-core reuse history
+            int per_core_history_size = m_access_history_by_core[core_index].size();
+            int per_core_reuse_distance = (history_size - out_index) / 2;
+
+            float random3 = m_rng.random<float>();
+            out_index = m_access_history[out_index];
+            if (random3 < 0.9f) {
+                if ((per_core_reuse_distance <= per_core_history_size) && (per_core_reuse_distance > 0)) {
+                    out_index = m_access_history_by_core[core_index][per_core_history_size - per_core_reuse_distance];
+                }
+            }
         }
     }
-    m_access_history_vector.push_back(out_index);
+        
+    m_access_history.push_back(out_index);
+    m_access_history_by_core[core_index].push_back(out_index);
+    m_check_vector[out_index]->setCoreIndex(core_index);
+
     return m_check_vector[out_index];
 }
 

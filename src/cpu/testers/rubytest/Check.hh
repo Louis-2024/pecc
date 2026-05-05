@@ -59,6 +59,7 @@ class Check
         Cycles curTime);
     Addr getAddress() const { return m_address; }
     void changeAddress(Addr address);
+    void setCoreIndex(int index) { m_index = index; }
 
     void print(std::ostream& out) const;
 
@@ -83,6 +84,8 @@ class Check
     int m_num_writers;
     int m_num_readers;
     RubyTester* m_tester_ptr;
+
+    int m_index = -1;
 };
 
 inline std::ostream&
