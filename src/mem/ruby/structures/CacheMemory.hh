@@ -93,7 +93,7 @@ class CacheMemory : public SimObject
     //   b) an unused line in the same cache "way"
     bool cacheAvail(Addr address) const;
     bool cleanCacheAvail(Addr address) const;
-    bool dirtyCacheAvail(Addr address) const;
+    int dirtyCacheCount(Addr address) const;
 
     // Returns a NULL entry that acts as a placeholder for invalid lines
     AbstractCacheEntry*

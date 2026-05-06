@@ -382,7 +382,7 @@ Addr
 CacheMemory::dirtyCacheProbe(Addr address) const
 {
     assert(address == makeLineAddress(address));
-    assert(dirtyCacheAvail(address));
+    assert(dirtyCacheCount(address) > 0);
     AbstractCacheEntry* victim_entry = nullptr;
     Tick lastAccessTime = MaxTick;
     int64_t cacheSet = addressToCacheSet(address);
@@ -402,20 +402,21 @@ CacheMemory::dirtyCacheProbe(Addr address) const
     return victim_entry->m_Address;
 }
 
-bool
-CacheMemory::dirtyCacheAvail(Addr address) const
+int
+CacheMemory::dirtyCacheCount(Addr address) const
 {
     int64_t cacheSet = addressToCacheSet(address);
+    int count = 0;
     for (int i = 0; i < m_cache_assoc; i++) {
         AbstractCacheEntry* entry = m_cache[cacheSet][i];
         if (entry == nullptr) {
             continue;
         }
         if (entry->getDirty()) {
-            return true;
+            count++;
         }
     }
-    return false;
+    return count;
 }
 
 // looks an address up in the cache

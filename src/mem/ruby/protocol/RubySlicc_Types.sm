@@ -199,7 +199,7 @@ structure (CacheMemory, external = "yes") {
   Addr cacheProbe(Addr);
   bool cleanCacheAvail(Addr);
   Addr cleanCacheProbe(Addr);
-  bool dirtyCacheAvail(Addr);
+  int dirtyCacheCount(Addr);
   Addr dirtyCacheProbe(Addr);
 
   AbstractCacheEntry getNullEntry();
