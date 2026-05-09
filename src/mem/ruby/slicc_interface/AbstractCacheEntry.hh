@@ -124,6 +124,8 @@ class AbstractCacheEntry : public ReplaceableEntry
 
     // to be overridden
     virtual bool getDirty() { return false; }
+    virtual bool getOwned() { return false; }
+    virtual bool getShared() { return false; }
 
   private:
     // hardware transactional memory

@@ -94,6 +94,7 @@ class CacheMemory : public SimObject
     bool cacheAvail(Addr address) const;
     bool cleanCacheAvail(Addr address) const;
     int dirtyCacheCount(Addr address) const;
+    int ownedCacheCount(Addr address) const;
 
     // Returns a NULL entry that acts as a placeholder for invalid lines
     AbstractCacheEntry*
@@ -116,6 +117,8 @@ class CacheMemory : public SimObject
     Addr cacheProbe(Addr address) const;
     Addr cleanCacheProbe(Addr address) const;
     Addr dirtyCacheProbe(Addr address) const;
+    Addr ownedCacheProbe(Addr address) const;
+    Addr notOwnedCacheProbe(Addr address) const;
 
     // looks an address up in the cache
     AbstractCacheEntry* lookup(Addr address);

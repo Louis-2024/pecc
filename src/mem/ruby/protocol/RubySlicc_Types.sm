@@ -201,6 +201,9 @@ structure (CacheMemory, external = "yes") {
   Addr cleanCacheProbe(Addr);
   int dirtyCacheCount(Addr);
   Addr dirtyCacheProbe(Addr);
+  int ownedCacheCount(Addr);
+  Addr ownedCacheProbe(Addr);
+  Addr notOwnedCacheProbe(Addr);
 
   AbstractCacheEntry getNullEntry();
   AbstractCacheEntry allocate(Addr, AbstractCacheEntry);

@@ -419,6 +419,71 @@ CacheMemory::dirtyCacheCount(Addr address) const
     return count;
 }
 
+Addr
+CacheMemory::ownedCacheProbe(Addr address) const
+{
+    assert(address == makeLineAddress(address));
+    assert(ownedCacheCount(address) > 0);
+    AbstractCacheEntry* victim_entry = nullptr;
+    Tick lastAccessTime = MaxTick;
+    int64_t cacheSet = addressToCacheSet(address);
+    for (int i = 0; i < m_cache_assoc; i++) {
+        AbstractCacheEntry* current_entry = m_cache[cacheSet][i];
+        if (current_entry == nullptr) {
+            continue;
+        }
+        if (current_entry->getOwned()) {
+            if (current_entry->getLastAccess() < lastAccessTime){
+                victim_entry = current_entry;
+                lastAccessTime = current_entry->getLastAccess();
+            }
+        }
+    }
+    assert(victim_entry != nullptr);
+    return victim_entry->m_Address;
+}
+
+Addr
+CacheMemory::notOwnedCacheProbe(Addr address) const
+{
+    assert(address == makeLineAddress(address));
+    assert(ownedCacheCount(address) < m_cache_assoc);
+    AbstractCacheEntry* victim_entry = nullptr;
+    Tick lastAccessTime = MaxTick;
+    int64_t cacheSet = addressToCacheSet(address);
+    for (int i = 0; i < m_cache_assoc; i++) {
+        AbstractCacheEntry* current_entry = m_cache[cacheSet][i];
+        if (current_entry == nullptr) {
+            continue;
+        }
+        if (!current_entry->getOwned()) {
+            if (current_entry->getLastAccess() < lastAccessTime){
+                victim_entry = current_entry;
+                lastAccessTime = current_entry->getLastAccess();
+            }
+        }
+    }
+    assert(victim_entry != nullptr);
+    return victim_entry->m_Address;
+}
+
+int
+CacheMemory::ownedCacheCount(Addr address) const
+{
+    int64_t cacheSet = addressToCacheSet(address);
+    int count = 0;
+    for (int i = 0; i < m_cache_assoc; i++) {
+        AbstractCacheEntry* entry = m_cache[cacheSet][i];
+        if (entry == nullptr) {
+            continue;
+        }
+        if (entry->getOwned()) {
+            count++;
+        }
+    }
+    return count;
+}
+
 // looks an address up in the cache
 AbstractCacheEntry*
 CacheMemory::lookup(Addr address)
