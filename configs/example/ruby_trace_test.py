@@ -24,7 +24,7 @@ Ruby.define_options(parser)
 
 args = parser.parse_args()
 
-traceFile = f"traces/{args.num_cpus}_core_trace.txt"
+traceFile = f"traces/synth_{args.num_cpus}_core_trace.txt"
 
 #
 # Currently ruby does not support atomic or uncacheable accesses
