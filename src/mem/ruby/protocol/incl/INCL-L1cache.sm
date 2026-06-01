@@ -449,9 +449,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
                         } else {
                             // otherwise, select a victim for replacement
                             Addr victim_addr := L1Dcache.cacheProbe(address);
-                            if (L1Dcache.ownedCacheCount(address) < 2) {
-                                victim_addr := L1Dcache.notOwnedCacheProbe(address);
-                            }
                             CacheEntry victim_entry := getCacheEntry(victim_addr);
                             TBE victim_tbe := TBEs[victim_addr];
                             assert(is_valid(victim_entry));
