@@ -52,6 +52,7 @@ python_class_map = {
                     "std::string": "String",
                     "bool": "Bool",
                     "CacheMemory": "RubyCache",
+                    "L1CacheArray": "RubyL1CacheArray",
                     "WireBuffer": "RubyWireBuffer",
                     "Sequencer": "RubySequencer",
                     "HTMSequencer": "RubyHTMSequencer",

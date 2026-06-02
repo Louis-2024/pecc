@@ -9,6 +9,9 @@ machine(MachineType:L2Cache, "LLC") :
     DirectoryMemory *directory;
     // Cache memory
     CacheMemory *cacheMemory;
+    // Read-only helper for probing all L1I/L1D tag arrays
+    L1CacheArray *l1CacheArray;
+    int num_l1_controllers := 0;
 
     // Latency
     Cycles cache_access_latency := 1;
@@ -127,6 +130,11 @@ machine(MachineType:L2Cache, "LLC") :
         }
         dir_entry := static_cast(Entry, "pointer", directory.allocate(addr, new Entry));
         return dir_entry;
+    }
+
+    bool isLinePresentInAnyL1(Addr addr) {
+        assert(l1CacheArray.getNumCores() == num_l1_controllers);
+        return l1CacheArray.isTagPresent(addr);
     }
 
     // Interface functions required by SLICC
@@ -572,6 +580,14 @@ machine(MachineType:L2Cache, "LLC") :
     action(assertClean, desc="") {
         assert(is_valid(cache_entry));
         assert(cache_entry.dirty == false);
+    }
+
+    action(assertPresentInL1, desc="") {
+        assert(isLinePresentInAnyL1(address));
+    }
+
+    action(assertNotPresentInL1, desc="") {
+        assert(isLinePresentInAnyL1(address));
     }
 
     ////////////////////////////////////////////////////////////////////////////

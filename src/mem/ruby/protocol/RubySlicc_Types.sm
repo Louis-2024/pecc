@@ -234,6 +234,13 @@ structure (CacheMemory, external = "yes") {
   void profilePrefetchMiss();
 }
 
+structure (L1CacheArray, external = "yes") {
+  bool isTagPresent(Addr);
+  bool isL1ICacheTagPresent(int, Addr);
+  bool isL1DCacheTagPresent(int, Addr);
+  int getNumCores();
+}
+
 structure (WireBuffer, inport="yes", outport="yes", external = "yes") {
 
 }

@@ -92,6 +92,8 @@ def create_system(
     
     cpu_sequencers = []
     l1_cntrl_nodes = []
+    l1i_caches = []
+    l1d_caches = []
 
     block_size_bits = int(math.log(options.cacheline_size, 2))
     l2_bits = int(math.log(num_llc_banks, 2))
@@ -149,6 +151,8 @@ def create_system(
 
         cpu_sequencers.append(cpu_seq)
         l1_cntrl_nodes.append(l1_cntrl)
+        l1i_caches.append(l1i_cache)
+        l1d_caches.append(l1d_cache)
 
         # Connect L1 controller and the network
         # mandatory queue
@@ -169,6 +173,13 @@ def create_system(
         l1_cntrl.requestOut.out_port = ruby_system.network.in_port
         l1_cntrl.responseOut = MessageBuffer(ordered=False)
         l1_cntrl.responseOut.out_port = ruby_system.network.in_port
+
+    l1_cache_array = RubyL1CacheArray(
+        l1i_caches=l1i_caches,
+        l1d_caches=l1d_caches,
+        num_cores=options.num_cpus,
+    )
+    ruby_system.l1_cache_array = l1_cache_array
     
     # Create L2 caches (LLC)
     l2_cntrl_nodes = []
@@ -201,6 +212,8 @@ def create_system(
             version=i,
             directory=dir_memory,
             cacheMemory=cache,
+            l1CacheArray=l1_cache_array,
+            num_l1_controllers=options.num_cpus,
             transitions_per_cycle=16,
             clk_domain=ruby_system.clk_domain,
             ruby_system=ruby_system,
