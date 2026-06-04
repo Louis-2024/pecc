@@ -812,6 +812,16 @@ machine(MachineType:L1Cache, "L1 Cache") :
         tbe.to_I := true;
     }
 
+    action(setWiredORToTrue, desc="") {
+        L1Icache.setWiredOR(address);
+        L1Dcache.setWiredOR(address);
+    }
+
+    action(setWiredORToFalse, desc="") {
+        L1Icache.setWiredOR(intToAddress(0));
+        L1Dcache.setWiredOR(intToAddress(0));
+    }
+
     action(checkAndAddRequestor, desc="Add requestor") {
         assert(is_valid(tbe));
         if (!tbe.to_I) {

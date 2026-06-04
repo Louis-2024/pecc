@@ -60,12 +60,12 @@ L1CacheArray::isTagOwnedExceptCore(NodeID excluded_core, Addr address) const
         }
 
         AbstractCacheEntry* l1i_entry = m_l1iCaches[core]->lookup(address);
-        if (l1i_entry != nullptr && l1i_entry->getOwned()) {
+        if ((l1i_entry != nullptr && l1i_entry->getOwned()) || (m_l1iCaches[core]->getWiredOR() == address)) {
             return true;
         }
 
         AbstractCacheEntry* l1d_entry = m_l1dCaches[core]->lookup(address);
-        if (l1d_entry != nullptr && l1d_entry->getOwned()) {
+        if ((l1d_entry != nullptr && l1d_entry->getOwned()) || (m_l1dCaches[core]->getWiredOR() == address)) {
             return true;
         }
     }
