@@ -166,6 +166,9 @@ class CacheMemory : public SimObject
     int getNumBlocks() const { return m_cache_num_sets * m_cache_assoc; }
     Addr getAddressAtIdx(int idx) const;
 
+    Addr getWiredOR() const { return wiredOR; }
+    void setWiredOR(Addr addr) { wiredOR = addr; }
+
   private:
     // convert a Address to its location in the cache
     int64_t addressToCacheSet(Addr address) const;
@@ -217,6 +220,8 @@ class CacheMemory : public SimObject
      * false.
      */
     bool m_use_occupancy;
+
+    Addr wiredOR;
 
     private:
       struct CacheMemoryStats : public statistics::Group

@@ -35,35 +35,41 @@ L1CacheArray::L1CacheArray(const Params &p)
     }
 }
 
-bool
-L1CacheArray::validCore(int core) const
-{
-    return core >= 0 && core < m_numCores;
-}
 
 bool
-L1CacheArray::isTagPresent(Addr address) const
+L1CacheArray::isTagPresentExceptCore(NodeID excluded_core, Addr address) const
 {
     for (int core = 0; core < m_numCores; ++core) {
+        if (static_cast<NodeID>(core) == excluded_core) {
+            continue;
+        }
         if (m_l1iCaches[core]->isTagPresent(address) ||
             m_l1dCaches[core]->isTagPresent(address)) {
             return true;
         }
     }
-
     return false;
 }
 
 bool
-L1CacheArray::isL1ICacheTagPresent(int core, Addr address) const
+L1CacheArray::isTagOwnedExceptCore(NodeID excluded_core, Addr address) const
 {
-    return validCore(core) && m_l1iCaches[core]->isTagPresent(address);
-}
+    for (int core = 0; core < m_numCores; ++core) {
+        if (static_cast<NodeID>(core) == excluded_core) {
+            continue;
+        }
 
-bool
-L1CacheArray::isL1DCacheTagPresent(int core, Addr address) const
-{
-    return validCore(core) && m_l1dCaches[core]->isTagPresent(address);
+        AbstractCacheEntry* l1i_entry = m_l1iCaches[core]->lookup(address);
+        if (l1i_entry != nullptr && l1i_entry->getOwned()) {
+            return true;
+        }
+
+        AbstractCacheEntry* l1d_entry = m_l1dCaches[core]->lookup(address);
+        if (l1d_entry != nullptr && l1d_entry->getOwned()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace ruby

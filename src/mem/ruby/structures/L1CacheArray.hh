@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/types.hh"
+#include "mem/ruby/common/TypeDefines.hh"
 #include "mem/ruby/structures/CacheMemory.hh"
 #include "params/RubyL1CacheArray.hh"
 #include "sim/sim_object.hh"
@@ -26,13 +27,9 @@ class L1CacheArray : public SimObject
 
     L1CacheArray(const Params &p);
 
-    bool isTagPresent(Addr address) const;
-    bool isL1ICacheTagPresent(int core, Addr address) const;
-    bool isL1DCacheTagPresent(int core, Addr address) const;
+    bool isTagPresentExceptCore(NodeID excluded_core, Addr address) const;
+    bool isTagOwnedExceptCore(NodeID excluded_core, Addr address) const;
     int getNumCores() const { return m_numCores; }
-
-  private:
-    bool validCore(int core) const;
 
     std::vector<CacheMemory *> m_l1iCaches;
     std::vector<CacheMemory *> m_l1dCaches;

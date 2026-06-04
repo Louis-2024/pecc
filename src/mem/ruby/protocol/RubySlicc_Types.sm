@@ -235,9 +235,8 @@ structure (CacheMemory, external = "yes") {
 }
 
 structure (L1CacheArray, external = "yes") {
-  bool isTagPresent(Addr);
-  bool isL1ICacheTagPresent(int, Addr);
-  bool isL1DCacheTagPresent(int, Addr);
+  bool isTagPresentExceptCore(NodeID, Addr);
+  bool isTagOwnedExceptCore(NodeID, Addr);
   int getNumCores();
 }
 
