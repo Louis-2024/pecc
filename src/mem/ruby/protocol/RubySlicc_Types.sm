@@ -232,6 +232,9 @@ structure (CacheMemory, external = "yes") {
   void profileDemandMiss();
   void profilePrefetchHit();
   void profilePrefetchMiss();
+
+  Addr getWiredOR();
+  void setWiredOR(Addr);
 }
 
 structure (L1CacheArray, external = "yes") {
