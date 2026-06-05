@@ -20,6 +20,7 @@ L1CacheArray::L1CacheArray(const Params &p)
       m_numCores(p.num_cores)
 {
     fatal_if(m_numCores < 0, "RubyL1CacheArray num_cores must be non-negative");
+    L1OwnerResponded.resize(m_numCores, false);
     fatal_if(m_l1iCaches.size() != static_cast<size_t>(m_numCores),
              "RubyL1CacheArray has %zu L1I caches for %d cores",
              m_l1iCaches.size(), m_numCores);
@@ -33,6 +34,18 @@ L1CacheArray::L1CacheArray(const Params &p)
         fatal_if(m_l1dCaches[core] == nullptr,
                  "RubyL1CacheArray L1D cache pointer %d is null", core);
     }
+}
+
+bool
+L1CacheArray::getL1OwnerResponded(NodeID index) const
+{
+    return L1OwnerResponded[index];
+}
+
+void
+L1CacheArray::setL1OwnerResponded(NodeID index, bool val)
+{
+    L1OwnerResponded[index] = val;
 }
 
 
@@ -59,13 +72,17 @@ L1CacheArray::isTagOwnedExceptCore(NodeID excluded_core, Addr address) const
             continue;
         }
 
+        if (getL1OwnerResponded(excluded_core)) {
+            return true;
+        }
+
         AbstractCacheEntry* l1i_entry = m_l1iCaches[core]->lookup(address);
-        if ((l1i_entry != nullptr && l1i_entry->getOwned()) || (m_l1iCaches[core]->getWiredOR() == address)) {
+        if (l1i_entry != nullptr && l1i_entry->getOwned()) {
             return true;
         }
 
         AbstractCacheEntry* l1d_entry = m_l1dCaches[core]->lookup(address);
-        if ((l1d_entry != nullptr && l1d_entry->getOwned()) || (m_l1dCaches[core]->getWiredOR() == address)) {
+        if (l1d_entry != nullptr && l1d_entry->getOwned()) {
             return true;
         }
     }

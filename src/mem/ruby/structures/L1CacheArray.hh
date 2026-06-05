@@ -30,10 +30,14 @@ class L1CacheArray : public SimObject
     bool isTagPresentExceptCore(NodeID excluded_core, Addr address) const;
     bool isTagOwnedExceptCore(NodeID excluded_core, Addr address) const;
     int getNumCores() const { return m_numCores; }
+    bool getL1OwnerResponded(NodeID index) const;
+    void setL1OwnerResponded(NodeID index, bool val);
 
     std::vector<CacheMemory *> m_l1iCaches;
     std::vector<CacheMemory *> m_l1dCaches;
     int m_numCores;
+
+    std::vector<bool> L1OwnerResponded;
 };
 
 } // namespace ruby

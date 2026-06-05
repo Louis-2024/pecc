@@ -180,6 +180,9 @@ def create_system(
         num_cores=options.num_cpus,
     )
     ruby_system.l1_cache_array = l1_cache_array
+
+    for l1_cntrl in l1_cntrl_nodes:
+        l1_cntrl.l1CacheArray = l1_cache_array
     
     # Create L2 caches (LLC)
     l2_cntrl_nodes = []
@@ -213,7 +216,6 @@ def create_system(
             directory=dir_memory,
             cacheMemory=cache,
             l1CacheArray=l1_cache_array,
-            num_l1_controllers=options.num_cpus,
             transitions_per_cycle=16,
             clk_domain=ruby_system.clk_domain,
             ruby_system=ruby_system,

@@ -11,7 +11,6 @@ machine(MachineType:L2Cache, "LLC") :
     CacheMemory *cacheMemory;
     // Read-only helper for probing all L1I/L1D tag arrays
     L1CacheArray *l1CacheArray;
-    int num_l1_controllers := 0;
 
     // Latency
     Cycles cache_access_latency := 1;
@@ -133,13 +132,11 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     bool isLinePresentInAnyOtherL1(Addr addr, MachineID requestor) {
-        assert(l1CacheArray.getNumCores() == num_l1_controllers);
         assert(machineIDToMachineType(requestor) == MachineType:L1Cache);
         return l1CacheArray.isTagPresentExceptCore(machineIDToNodeID(requestor), addr);
     }
 
     bool isLineOwnedInAnyOtherL1(Addr addr, MachineID requestor) {
-        assert(l1CacheArray.getNumCores() == num_l1_controllers);
         assert(machineIDToMachineType(requestor) == MachineType:L1Cache);
         return l1CacheArray.isTagOwnedExceptCore(machineIDToNodeID(requestor), addr);
     }

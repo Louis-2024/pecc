@@ -241,6 +241,8 @@ structure (L1CacheArray, external = "yes") {
   bool isTagPresentExceptCore(NodeID, Addr);
   bool isTagOwnedExceptCore(NodeID, Addr);
   int getNumCores();
+  bool getL1OwnerResponded(NodeID);
+  void setL1OwnerResponded(NodeID, bool);
 }
 
 structure (WireBuffer, inport="yes", outport="yes", external = "yes") {

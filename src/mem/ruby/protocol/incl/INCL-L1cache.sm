@@ -8,6 +8,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // Cache memory
     CacheMemory *L1Icache;
     CacheMemory *L1Dcache;
+    L1CacheArray *l1CacheArray;
 
     // boolean parameter indicating whether eviction callback is required
     bool send_evictions;
@@ -556,8 +557,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
             out_msg.requestor := machineID;
             out_msg.Destination.clear();
             out_msg.Destination.broadcast(MachineType:L1Cache);
-            out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
-                                    l2_select_low_bit, l2_select_num_bits, intToID(0)));
+            out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache, l2_select_low_bit, l2_select_num_bits, intToID(0)));
             out_msg.MessageSize := MessageSizeType:Control;
         }
     }
@@ -573,8 +573,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
             out_msg.requestor := machineID;
             out_msg.Destination.clear();
             out_msg.Destination.broadcast(MachineType:L1Cache);
-            out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
-                                    l2_select_low_bit, l2_select_num_bits, intToID(0)));
+            out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache, l2_select_low_bit, l2_select_num_bits, intToID(0)));
             out_msg.MessageSize := MessageSizeType:Control;
         }
     }
@@ -719,10 +718,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
-    action(deallocateCacheEntry, desc="...") {
-        assert(is_invalid(tbe));
-        deallocateCacheEntry(address);
-        unset_cache_entry();
+    action(resetStateBits, desc="...") {
+        assert(is_valid(cache_entry));
+        cache_entry.owned := false;
+        cache_entry.modified := false;
+        cache_entry.exclusive := false;
+        cache_entry.dirty := false;
     }
 
     action(allocateTBE, desc="Allocate TBE") {
@@ -812,14 +813,16 @@ machine(MachineType:L1Cache, "L1 Cache") :
         tbe.to_I := true;
     }
 
-    action(setWiredORToTrue, desc="") {
-        L1Icache.setWiredOR(address);
-        L1Dcache.setWiredOR(address);
+    action(setResponseToRequestor, desc="") {
+        peek(requestInPort, RequestMsg) {
+            assert(machineIDToMachineType(in_msg.requestor) == MachineType:L1Cache);
+            l1CacheArray.setL1OwnerResponded(
+                machineIDToNodeID(in_msg.requestor), true);
+        }
     }
 
-    action(setWiredORToFalse, desc="") {
-        L1Icache.setWiredOR(intToAddress(0));
-        L1Dcache.setWiredOR(intToAddress(0));
+    action(unsetResponseToRequestor, desc="") {
+        l1CacheArray.setL1OwnerResponded(machineIDToNodeID(machineID), false);
     }
 
     action(checkAndAddRequestor, desc="Add requestor") {
@@ -907,10 +910,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // Transition on CPU request
 
     transition({O, E, S}, ReplacementSilent) {
-        deallocateCacheEntry;
+        invalidateCacheEntry;
     }
 
     transition({M, O, E}, ReplacementWriteback) {
+        resetStateBits;
         allocateTBE;
         initiateReplacement;
         sendBusRequest;
@@ -1009,6 +1013,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition({M, E}, OtherGetM, I) {
+        setResponseToRequestor;
         sendDataResponse;
         invalidateCacheEntry;
         popRequestQueue;
@@ -1020,6 +1025,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(O, OtherGetM, I) {
+        setResponseToRequestor;
         sendDataResponse;
         invalidateCacheEntry;
         popRequestQueue;
@@ -1119,6 +1125,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
     
     transition({M, O, E}, BusGrantDoPut, I_AD) {
+        resetStateBits;
         sendPut;
         popBusGrantQueue;
     }
@@ -1169,21 +1176,44 @@ machine(MachineType:L1Cache, "L1 Cache") :
         triggerLocalReqCompletion;
     }
 
-    transition(S_D, {DataCacheToCache, DataFromLLC, DataFromMem}, CMP) {
+    transition(S_D, DataCacheToCache, CMP) {
+        unsetResponseToRequestor;
         writeDataResponseToCache;
         externalLoadHit;
         popResponseQueue;
         triggerLocalReqCompletion;
     }
 
-    transition(M_D, {DataCacheToCache, DataFromLLC, DataFromMem}, CMP) {
+    transition(M_D, DataCacheToCache, CMP) {
+        unsetResponseToRequestor;
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
         triggerLocalReqCompletion;
     }
 
-    transition(ML_D, {DataCacheToCache, DataFromLLC, DataFromMem}, L) {
+    transition(ML_D, DataCacheToCache, L) {
+        unsetResponseToRequestor;
+        writeDataResponseToCache;
+        externalStoreHit;
+        popResponseQueue;
+    }
+
+    transition(S_D, {DataFromLLC, DataFromMem}, CMP) {
+        writeDataResponseToCache;
+        externalLoadHit;
+        popResponseQueue;
+        triggerLocalReqCompletion;
+    }
+
+    transition(M_D, {DataFromLLC, DataFromMem}, CMP) {
+        writeDataResponseToCache;
+        externalStoreHit;
+        popResponseQueue;
+        triggerLocalReqCompletion;
+    }
+
+    transition(ML_D, {DataFromLLC, DataFromMem}, L) {
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
