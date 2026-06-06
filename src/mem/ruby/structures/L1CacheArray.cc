@@ -56,8 +56,12 @@ L1CacheArray::isTagPresentExceptCore(NodeID excluded_core, Addr address) const
         if (static_cast<NodeID>(core) == excluded_core) {
             continue;
         }
-        if (m_l1iCaches[core]->isTagPresent(address) ||
-            m_l1dCaches[core]->isTagPresent(address)) {
+        AbstractCacheEntry* l1i_entry = m_l1iCaches[core]->lookup(address);
+        if (l1i_entry != nullptr && l1i_entry->getValid()) {
+            return true;
+        }
+        AbstractCacheEntry* l1d_entry = m_l1dCaches[core]->lookup(address);
+        if (l1d_entry != nullptr && l1d_entry->getValid()) {
             return true;
         }
     }

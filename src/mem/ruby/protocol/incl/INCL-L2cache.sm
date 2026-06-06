@@ -89,6 +89,7 @@ machine(MachineType:L2Cache, "LLC") :
     structure(TBE, desc="Transaction buffer entry") {
         NetDest requestors, desc="requestor";
         NetDest forwardOwner, desc="only for immediate state forwarding";
+        bool fetchAsOwner, desc="";
     }
 
     structure(TBETable, external="yes") {
@@ -131,14 +132,14 @@ machine(MachineType:L2Cache, "LLC") :
         return dir_entry;
     }
 
-    bool isLinePresentInAnyOtherL1(Addr addr, MachineID requestor) {
+    bool isL1Present(Addr addr, MachineID requestor) {
         assert(machineIDToMachineType(requestor) == MachineType:L1Cache);
         return l1CacheArray.isTagPresentExceptCore(machineIDToNodeID(requestor), addr);
     }
 
-    bool isLineOwnedInAnyOtherL1(Addr addr, MachineID requestor) {
+    bool isL1Owned(Addr addr, MachineID requestor, TBE tbe) {
         assert(machineIDToMachineType(requestor) == MachineType:L1Cache);
-        return l1CacheArray.isTagOwnedExceptCore(machineIDToNodeID(requestor), addr);
+        return l1CacheArray.isTagOwnedExceptCore(machineIDToNodeID(requestor), addr) || (is_valid(tbe) && tbe.fetchAsOwner);
     }
 
     // Interface functions required by SLICC
@@ -251,11 +252,12 @@ machine(MachineType:L2Cache, "LLC") :
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
                 if (in_msg.type == CoherenceRequestType:GetS) {
-                    if (isLineOwnedInAnyOtherL1(in_msg.addr, in_msg.requestor)) {
+                    if (isL1Owned(in_msg.addr, in_msg.requestor, tbe)) {
+                        DPRINTF(FlexLLC, "DontCare: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                         trigger(Event:DontCare, in_msg.addr, cache_entry, tbe);
                     } else {
                         if (cacheMemory.isTagPresent(in_msg.addr)) {
-                            if(!isLinePresentInAnyOtherL1(in_msg.addr, in_msg.requestor)) {
+                            if(!isL1Present(in_msg.addr, in_msg.requestor)) {
                                 // GetE
                                 DPRINTF(FlexLLC, "GetE: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                                 trigger(Event:GetE, in_msg.addr, cache_entry, tbe);
@@ -265,7 +267,7 @@ machine(MachineType:L2Cache, "LLC") :
                                 trigger(Event:GetS, in_msg.addr, cache_entry, tbe);
                             }
                         } else {
-                            if(!isLinePresentInAnyOtherL1(in_msg.addr, in_msg.requestor)) {
+                            if(!isL1Present(in_msg.addr, in_msg.requestor)) {
                                 // GetE
                                 DPRINTF(FlexLLC, "GetE: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                                 trigger(Event:GetE, in_msg.addr, cache_entry, tbe);
@@ -291,14 +293,15 @@ machine(MachineType:L2Cache, "LLC") :
                         }
                     }
                 } else if (in_msg.type == CoherenceRequestType:GetM) {
-                    if (isLineOwnedInAnyOtherL1(in_msg.addr, in_msg.requestor)) {
+                    if (isL1Owned(in_msg.addr, in_msg.requestor, tbe)) {
+                        DPRINTF(FlexLLC, "DontCare: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                         trigger(Event:DontCare, in_msg.addr, cache_entry, tbe);
                     } else {
                         DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                         trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
                     }
                 } else if (in_msg.type == CoherenceRequestType:Put) {
-                    assert(!isLineOwnedInAnyOtherL1(in_msg.addr, in_msg.requestor));
+                    assert(!isL1Owned(in_msg.addr, in_msg.requestor, tbe));
                     if (cacheMemory.cacheAvail(in_msg.addr)) {
                         // if there exists vac, insert directly
                         DPRINTF(FlexLLC, "Put: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
@@ -632,6 +635,18 @@ machine(MachineType:L2Cache, "LLC") :
         assert(cache_entry.dirty == false);
     }
 
+    action(unsetL1Resp, desc="") {
+        peek(requestInPort, RequestMsg) {
+            assert(machineIDToMachineType(in_msg.requestor) == MachineType:L1Cache);
+            l1CacheArray.setL1OwnerResponded(machineIDToNodeID(in_msg.requestor), false);
+        }
+    }
+
+    action(setFetchAsOwner, desc="") {
+        assert(is_valid(tbe));
+        tbe.fetchAsOwner := true;
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
@@ -672,6 +687,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     transition(L2I, GetE, L2I_D) {MemAccess} {
         allocateTBE;
+        setFetchAsOwner;
         sendMemRead;
         setOwnerToMemRead;
         popRequestQueue;
@@ -679,6 +695,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     transition(L2I, GetM, L2I_D) {MemAccess} {
         allocateTBE;
+        setFetchAsOwner;
         sendMemRead;
         setOwnerToMemRead;
         popRequestQueue;
@@ -724,7 +741,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(L2V, Upgrade, L2I) {
+    transition(L2V, Upgrade, L2I) {BankAccess} {
         deallocateCacheBlock;
         popRequestQueue;
     }
@@ -764,7 +781,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(L2I_D, Upgrade) {
+    transition(L2I_D, Upgrade) {BankAccess}  {
         popRequestQueue;
     }
 
@@ -780,18 +797,20 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     transition(L2V_D, GetM, L2I_D) {
+        setFetchAsOwner;
         addRequestorToMemReq;
         setOwnerToMemRead;
         deallocateCacheBlock;
         popRequestQueue;
     }
 
-    transition(L2V_D, Upgrade, L2I_D) {
+    transition(L2V_D, Upgrade, L2I_D) {BankAccess} {
         deallocateCacheBlock;
         popRequestQueue;
     }
 
     transition({L2I, L2I_D, L2V, L2V_D}, DontCare) {
+        unsetL1Resp;
         popRequestQueue;
     }
 }

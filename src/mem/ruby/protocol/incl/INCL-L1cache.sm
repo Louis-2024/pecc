@@ -125,6 +125,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
     structure(CacheEntry, desc="Cache entry", interface="AbstractCacheEntry") {
         State state,            desc="Cache state";
         DataBlock dataBlk,      desc="Data block";
+        bool valid,             default="false", desc="Valid?";
+        bool getValid() { return valid; }
         bool owned,             default="false", desc="Owned?";
         bool getOwned() { return owned; }
         bool modified,          default="false", desc="Modified?";
@@ -710,6 +712,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         } else {
             // otherwise, reset cache entry field
             if (is_valid(cache_entry)) {
+                cache_entry.valid := false;
                 cache_entry.owned := false;
                 cache_entry.modified := false;
                 cache_entry.exclusive := false;
@@ -720,6 +723,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     action(resetStateBits, desc="...") {
         assert(is_valid(cache_entry));
+        cache_entry.valid := false;
         cache_entry.owned := false;
         cache_entry.modified := false;
         cache_entry.exclusive := false;
@@ -783,6 +787,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
+    action(setValid, desc="") {
+        assert(is_valid(cache_entry));
+        cache_entry.valid := true;
+    }
+
     action(setOwned, desc="") {
         assert(is_valid(cache_entry));
         cache_entry.owned := true;
@@ -813,16 +822,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
         tbe.to_I := true;
     }
 
-    action(setResponseToRequestor, desc="") {
+    action(setL1Resp, desc="") {
         peek(requestInPort, RequestMsg) {
             assert(machineIDToMachineType(in_msg.requestor) == MachineType:L1Cache);
-            l1CacheArray.setL1OwnerResponded(
-                machineIDToNodeID(in_msg.requestor), true);
+            l1CacheArray.setL1OwnerResponded(machineIDToNodeID(in_msg.requestor), true);
         }
-    }
-
-    action(unsetResponseToRequestor, desc="") {
-        l1CacheArray.setL1OwnerResponded(machineIDToNodeID(machineID), false);
     }
 
     action(checkAndAddRequestor, desc="Add requestor") {
@@ -1013,7 +1017,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition({M, E}, OtherGetM, I) {
-        setResponseToRequestor;
+        setL1Resp;
         sendDataResponse;
         invalidateCacheEntry;
         popRequestQueue;
@@ -1025,7 +1029,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(O, OtherGetM, I) {
-        setResponseToRequestor;
+        setL1Resp;
         sendDataResponse;
         invalidateCacheEntry;
         popRequestQueue;
@@ -1088,16 +1092,19 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(I, BusGrantDoGetS, S_AD) {
+        setValid;
         sendGetS;
         popBusGrantQueue;
     }
 
     transition(I, BusGrantDoGetM, M_AD) {
+        setValid;
         sendGetM;
         popBusGrantQueue;
     }
 
     transition(I, BusGrantDoGetMLocked, ML_AD) {
+        setValid;
         sendGetM;
         popBusGrantQueue;
     }
@@ -1138,13 +1145,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(M_AD, OwnGetM, M_D) {
-        setOwned;
         setExclusive;
         popRequestQueue;
     }
 
     transition(ML_AD, OwnGetM, ML_D) {
-        setOwned;
         setExclusive;
         popRequestQueue;
     }
@@ -1177,7 +1182,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(S_D, DataCacheToCache, CMP) {
-        unsetResponseToRequestor;
         writeDataResponseToCache;
         externalLoadHit;
         popResponseQueue;
@@ -1185,7 +1189,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(M_D, DataCacheToCache, CMP) {
-        unsetResponseToRequestor;
+        setOwned;
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
@@ -1193,7 +1197,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(ML_D, DataCacheToCache, L) {
-        unsetResponseToRequestor;
+        setOwned;
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
@@ -1207,6 +1211,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(M_D, {DataFromLLC, DataFromMem}, CMP) {
+        setOwned;
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
@@ -1214,6 +1219,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(ML_D, {DataFromLLC, DataFromMem}, L) {
+        setOwned;
         writeDataResponseToCache;
         externalStoreHit;
         popResponseQueue;
@@ -1224,6 +1230,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition({CMP, S, M, M_A, ML_A}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
         popResponseQueue;
     }
+
     transition(CMP, Complete, *) {
         finalizeTransaction;
         popTriggerQueue;

@@ -123,6 +123,7 @@ class AbstractCacheEntry : public ReplaceableEntry
     virtual void invalidateEntry() {}
 
     // to be overridden
+    virtual bool getValid() { return false; }
     virtual bool getDirty() { return false; }
     virtual bool getOwned() { return false; }
     virtual bool getShared() { return false; }
