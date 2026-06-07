@@ -723,9 +723,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         peek(responseInPort, ResponseMsg) {
             assert(is_valid(cache_entry));
             cache_entry.dataBlk := in_msg.dataBlk;
-            if (in_msg.invalidate) {
-                tbe.to_I := true;
-            }
         }
     }
 

@@ -86,7 +86,6 @@ machine(MachineType:L2Cache, "LLC") :
     // TBE
     structure(TBE, desc="Transaction buffer entry") {
         NetDest requestors, desc="requestor";
-        NetDest forwardOwner, desc="only for immediate state forwarding";
     }
 
     structure(TBETable, external="yes") {
@@ -343,7 +342,6 @@ machine(MachineType:L2Cache, "LLC") :
         TBEs.allocate(address);
         set_tbe(TBEs[address]);
         tbe.requestors.clear();
-        tbe.forwardOwner.clear();
     }
 
     action(deallocateTBE, desc="Deallocate TBE after memory read") {
@@ -361,7 +359,6 @@ machine(MachineType:L2Cache, "LLC") :
             dir_entry.reqID := in_msg.reqID;
             dir_entry.memReadIssueTime := curCycle();
             tbe.requestors.clear();
-            tbe.forwardOwner.clear();
             tbe.requestors.add(in_msg.requestor);
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
                 out_msg.addr := in_msg.addr;
@@ -380,15 +377,6 @@ machine(MachineType:L2Cache, "LLC") :
         peek(requestInPort, RequestMsg) {
             tbe.requestors.add(in_msg.requestor);
             DPRINTF(FlexLLC, "addRequestorToMemReq: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
-        }
-    }
-
-    action(setOwnerToMemRead, desc="") {
-        assert(is_valid(tbe));
-        peek(requestInPort, RequestMsg) {
-            tbe.forwardOwner.clear();
-            tbe.forwardOwner.add(in_msg.requestor);
-            DPRINTF(FlexLLC, "setOwnerToMemRead: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
         }
     }
 
@@ -469,54 +457,19 @@ machine(MachineType:L2Cache, "LLC") :
 
     action(forwardMemResponse, desc="") {
         assert(is_valid(tbe));
-        if (tbe.forwardOwner.count() == 0) {
-            // send to all requestors
-            peek(responseFromDirInPort, DirectoryMsg) {
-                enqueue(responseOutPort, ResponseMsg, 1) {
-                    out_msg.reqID := getDirectoryEntry(address).reqID;
-                    out_msg.addr := in_msg.addr;
-                    out_msg.type := CoherenceResponseType:FromMemory;
-                    out_msg.sender := in_msg.Sender;
-                    out_msg.Destination.clear();
-                    out_msg.Destination.addNetDest(tbe.requestors);
-                    out_msg.dataBlk := in_msg.DataBlk;
-                    out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.invalidate := false;
-                }
-                DPRINTF(FlexLLC, "forwardMemResponseToSharers: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, tbe.requestors);
+        peek(responseFromDirInPort, DirectoryMsg) {
+            enqueue(responseOutPort, ResponseMsg, 1) {
+                out_msg.reqID := getDirectoryEntry(address).reqID;
+                out_msg.addr := in_msg.addr;
+                out_msg.type := CoherenceResponseType:FromMemory;
+                out_msg.sender := in_msg.Sender;
+                out_msg.Destination.clear();
+                out_msg.Destination.addNetDest(tbe.requestors);
+                out_msg.dataBlk := in_msg.DataBlk;
+                out_msg.MessageSize := MessageSizeType:Response_Data;
+                out_msg.invalidate := false;
             }
-        } else if (tbe.forwardOwner.count() == 1) {
-            // send to owner
-            peek(responseFromDirInPort, DirectoryMsg) {
-                enqueue(responseOutPort, ResponseMsg, 1) {
-                    out_msg.reqID := getDirectoryEntry(address).reqID;
-                    out_msg.addr := in_msg.addr;
-                    out_msg.type := CoherenceResponseType:FromMemory;
-                    out_msg.sender := in_msg.Sender;
-                    out_msg.Destination.clear();
-                    out_msg.Destination.addNetDest(tbe.forwardOwner);
-                    out_msg.dataBlk := in_msg.DataBlk;
-                    out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.invalidate := false;
-                }
-                DPRINTF(FlexLLC, "forwardMemResponseToOwner: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, tbe.forwardOwner);
-            }
-            // then send to other requestors with invalidate
-            tbe.requestors.removeNetDest(tbe.forwardOwner);
-            peek(responseFromDirInPort, DirectoryMsg) {
-                enqueue(responseOutPort, ResponseMsg, 1) {
-                    out_msg.reqID := getDirectoryEntry(address).reqID;
-                    out_msg.addr := in_msg.addr;
-                    out_msg.type := CoherenceResponseType:FromMemory;
-                    out_msg.sender := in_msg.Sender;
-                    out_msg.Destination.clear();
-                    out_msg.Destination.addNetDest(tbe.requestors);
-                    out_msg.dataBlk := in_msg.DataBlk;
-                    out_msg.MessageSize := MessageSizeType:Response_Data;
-                    out_msg.invalidate := true;
-                }
-                DPRINTF(FlexLLC, "forwardMemResponseToInvRequestors: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, tbe.requestors);
-            }
+            DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, tbe.requestors);
         }
     }
     
@@ -615,7 +568,6 @@ machine(MachineType:L2Cache, "LLC") :
     transition(L2I, GetM, L2IL1Owned_D) {MemAccess} {
         allocateTBE;
         sendMemRead;
-        setOwnerToMemRead;
         popRequestQueue;
     }
 
@@ -655,7 +607,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(L2V, Upgrade, L2I_L1Owned) {
+    transition(L2V, Upgrade, L2I_L1Owned) {BankAccess} {
         setDirty;
         deallocateCacheBlock;
         popRequestQueue;
@@ -706,7 +658,6 @@ machine(MachineType:L2Cache, "LLC") :
 
     transition(L2I_D, GetM, L2IL1Owned_D) {
         addRequestorToMemReq;
-        setOwnerToMemRead;
         popRequestQueue;
     }
 
@@ -738,12 +689,11 @@ machine(MachineType:L2Cache, "LLC") :
     transition(L2V_D, GetM, L2IL1Owned_D) {
         setDirty;
         addRequestorToMemReq;
-        setOwnerToMemRead;
         deallocateCacheBlock;
         popRequestQueue;
     }
 
-    transition(L2V_D, Upgrade, L2IL1Owned_D) {
+    transition(L2V_D, Upgrade, L2IL1Owned_D) {BankAccess} {
         setDirty;
         deallocateCacheBlock;
         popRequestQueue;
