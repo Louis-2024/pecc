@@ -50,8 +50,6 @@ structure(ResponseMsg, desc="Response message", interface="Message") {
     Cycles                              reqID,             default="Cycles(0)", desc="Associated request ID";
     Addr                                addr,              desc="Physical address of the cache line";
     DataBlock                           dataBlk,           desc="Cache line data";
-    bool                                invalidate,        desc="";
-    
     CoherenceResponseType               type,              desc="Response type";
     MachineID                           sender,            desc="Sender of the response";
     NetDest                             Destination,       desc="Multicast destination mask";
