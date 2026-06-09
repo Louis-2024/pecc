@@ -280,8 +280,8 @@ structure(CustomProfiler, external="yes") {
     void profileRepetitiveL2Writes();
 }
 
-// Shared wired-OR line
+// Per-bank wired-OR lines
 structure(WiredOR, external="yes") {
-    void setWiredORLine(bool l1Owned);
-    bool readAndClearWiredORLine();
+    void setWiredORLine(NodeID bank, bool l1Owned);
+    bool readAndClearWiredORLine(NodeID bank);
 }

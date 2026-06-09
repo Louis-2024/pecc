@@ -100,7 +100,7 @@ def create_system(
     l2_bits = int(math.log(num_llc_banks, 2))
 
     profiler = CustomProfiler()
-    wired_or = WiredOR()
+    wired_or = WiredOR(num_banks=num_llc_banks)
  
     # Create L1 cache controller
     for i in range(options.num_cpus):

@@ -75,6 +75,8 @@ machine(MachineType:L2Cache, "LLC") :
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
         Addr from_addr, desc="Address of request that triggers replacement";
         bool writeback_triggered, desc="Indicator of chained eviction";
+        bool latchedL1Owned, default="false", desc="Latched wired-OR sample for current request";
+        bool latchedL1OwnedValid, default="false", desc="Whether wired-OR has been sampled";
     }
 
     // Cache entry
@@ -205,10 +207,19 @@ machine(MachineType:L2Cache, "LLC") :
         return avail;
     }
 
-    bool readAndClearWiredORLine() {
-        bool l1Owned := wiredOR.readAndClearWiredORLine();
-        DPRINTF(FlexLLC, "readAndClearWiredORLine: L1Owned = %d \n", l1Owned);
-        return l1Owned;
+    NodeID getL2BankId() {
+        return machineIDToNodeID(machineID);
+    }
+
+    bool getL1OwnedForRequest(Addr addr) {
+        Entry dir_entry := getDirectoryEntry(addr);
+        if (!dir_entry.latchedL1OwnedValid) {
+            NodeID bank := getL2BankId();
+            dir_entry.latchedL1Owned := wiredOR.readAndClearWiredORLine(bank);
+            dir_entry.latchedL1OwnedValid := true;
+            DPRINTF(FlexLLC, "sampleL1Owned: Address = %#x, Bank = %d, L1Owned = %d \n", addr, bank, dir_entry.latchedL1Owned);
+        }
+        return dir_entry.latchedL1Owned;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -246,7 +257,7 @@ machine(MachineType:L2Cache, "LLC") :
                 TBE tbe := TBEs[in_msg.addr];
                 if (in_msg.type == CoherenceRequestType:GetS) {
 
-                    bool L1Owned := readAndClearWiredORLine();
+                    bool L1Owned := getL1OwnedForRequest(in_msg.addr);
                     if (L1Owned) {
                         assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned);
                     }
@@ -276,7 +287,7 @@ machine(MachineType:L2Cache, "LLC") :
                     }
                 } else if (in_msg.type == CoherenceRequestType:GetM) {
 
-                    bool L1Owned := readAndClearWiredORLine();
+                    bool L1Owned := getL1OwnedForRequest(in_msg.addr);
                     if (L1Owned) {
                         assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned);
                     }
@@ -498,6 +509,8 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     action(popRequestQueue, desc="Pop the request queue") {
+        Entry dir_entry := getDirectoryEntry(address);
+        dir_entry.latchedL1OwnedValid := false;
         requestInPort.dequeue(clockEdge());
     }
 

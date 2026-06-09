@@ -737,10 +737,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
         cache_entry.shared := true;
     }
 
-    action(setWiredORLine, desc="Set the shared wired-OR L1-owned line") {
+    action(setWiredORLine, desc="") {
         assert(is_valid(cache_entry));
-        wiredOR.setWiredORLine(cache_entry.owned);
-        DPRINTF(FlexLLC, "(%s) (setWiredORLine: Address = %#x) \n", machineID, address);
+        MachineID l2_mach := mapAddressToRange(address, MachineType:L2Cache, l2_select_low_bit, l2_select_num_bits, intToID(0));
+        NodeID bank := machineIDToNodeID(l2_mach);
+        wiredOR.setWiredORLine(bank, cache_entry.owned);
+        DPRINTF(FlexLLC, "(%s) (setWiredORLine: Address = %#x, Bank = %d) \n", machineID, address, bank);
     }
 
     action(unsetShared, desc="") {
