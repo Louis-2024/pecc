@@ -8,45 +8,26 @@ namespace ruby
 
 WiredOR::WiredOR(const Params &p)
     : SimObject(p),
-      m_l1Owned(p.num_banks, false),
-      m_queuedL1Owned(p.num_banks)
+      m_l1OwnedAddrs(p.num_banks)
 {
 }
 
 void
-WiredOR::setWiredORLine(NodeID bank, bool l1Owned)
+WiredOR::addL1OwnedAddr(NodeID bank, Addr addr)
 {
-    m_l1Owned[bank] = m_l1Owned[bank] || l1Owned;
+    m_l1OwnedAddrs[bank].insert(addr);
 }
 
 bool
-WiredOR::readAndClearWiredORLine(NodeID bank)
+WiredOR::isL1OwnedAddr(NodeID bank, Addr addr)
 {
-    bool l1Owned = m_l1Owned[bank];
-    m_l1Owned[bank] = false;
-    return l1Owned;
+    return m_l1OwnedAddrs[bank].count(addr) != 0;
 }
 
-bool
-WiredOR::enqueueL1OwnedSample(NodeID bank)
+void
+WiredOR::removeL1OwnedAddr(NodeID bank, Addr addr)
 {
-    bool l1Owned = readAndClearWiredORLine(bank);
-    m_queuedL1Owned[bank].push_back(l1Owned);
-    return l1Owned;
-}
-
-bool
-WiredOR::dequeueL1OwnedSample(NodeID bank)
-{
-    bool l1Owned = m_queuedL1Owned[bank].front();
-    m_queuedL1Owned[bank].pop_front();
-    return l1Owned;
-}
-
-bool
-WiredOR::queueEmpty(NodeID bank)
-{
-    return m_queuedL1Owned[bank].empty();
+    m_l1OwnedAddrs[bank].erase(addr);
 }
 
 } // namespace ruby

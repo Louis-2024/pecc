@@ -280,11 +280,9 @@ structure(CustomProfiler, external="yes") {
     void profileRepetitiveL2Writes();
 }
 
-// Per-bank wired-OR lines
+// Per-bank L1-owned address tracking
 structure(WiredOR, external="yes") {
-    void setWiredORLine(NodeID bank, bool l1Owned);
-    bool readAndClearWiredORLine(NodeID bank);
-    bool enqueueL1OwnedSample(NodeID bank);
-    bool dequeueL1OwnedSample(NodeID bank);
-    bool queueEmpty(NodeID bank);
+    void addL1OwnedAddr(NodeID bank, Addr addr);
+    bool isL1OwnedAddr(NodeID bank, Addr addr);
+    void removeL1OwnedAddr(NodeID bank, Addr addr);
 }

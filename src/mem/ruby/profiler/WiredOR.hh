@@ -1,7 +1,7 @@
 #ifndef __MEM_RUBY_PROFILER_WIREDOR_HH__
 #define __MEM_RUBY_PROFILER_WIREDOR_HH__
 
-#include <deque>
+#include <unordered_set>
 #include <vector>
 
 #include "mem/ruby/common/TypeDefines.hh"
@@ -20,16 +20,12 @@ class WiredOR : public SimObject
     typedef WiredORParams Params;
     WiredOR(const Params &p);
 
-    void setWiredORLine(NodeID bank, bool l1Owned);
-    bool readAndClearWiredORLine(NodeID bank);
-
-    bool enqueueL1OwnedSample(NodeID bank);
-    bool dequeueL1OwnedSample(NodeID bank);
-    bool queueEmpty(NodeID bank);
+    void addL1OwnedAddr(NodeID bank, Addr addr);
+    bool isL1OwnedAddr(NodeID bank, Addr addr);
+    void removeL1OwnedAddr(NodeID bank, Addr addr);
 
   private:
-    std::vector<bool> m_l1Owned;
-    std::vector<std::deque<bool>> m_queuedL1Owned;
+    std::vector<std::unordered_set<Addr>> m_l1OwnedAddrs;
 };
 
 } // namespace ruby

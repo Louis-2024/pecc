@@ -739,9 +739,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     action(setWiredORLine, desc="") {
         assert(is_valid(cache_entry));
-        MachineID l2_mach := mapAddressToRange(address, MachineType:L2Cache, l2_select_low_bit, l2_select_num_bits, intToID(0));
-        NodeID bank := machineIDToNodeID(l2_mach);
-        wiredOR.setWiredORLine(bank, cache_entry.owned);
+        NodeID bank := machineIDToNodeID(mapAddressToRange(address, MachineType:L2Cache, l2_select_low_bit, l2_select_num_bits, intToID(0)));
+        wiredOR.addL1OwnedAddr(bank, address);
         DPRINTF(FlexLLC, "(%s) (setWiredORLine: Address = %#x, Bank = %d) \n", machineID, address, bank);
     }
 
