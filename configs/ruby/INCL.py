@@ -7,6 +7,9 @@ from .Ruby import create_topology
 from .Ruby import send_evicts
 import re
 
+L1_CONTROLLER_EVENT_PRIORITY = 2
+L2_CONTROLLER_EVENT_PRIORITY = 3
+DIR_CONTROLLER_EVENT_PRIORITY = 4
 
 def define_options(parser):
     # Specify the timing parameters in unit of cpu clock cycle
@@ -97,6 +100,7 @@ def create_system(
     l2_bits = int(math.log(num_llc_banks, 2))
 
     profiler = CustomProfiler()
+    wired_or = WiredOR()
  
     # Create L1 cache controller
     for i in range(options.num_cpus):
@@ -130,7 +134,9 @@ def create_system(
             cache_access_latency=options.l1_latency,
             mandatory_queue_latency=options.l1_latency,
             number_of_TBEs=1,
+            controller_event_priority=L1_CONTROLLER_EVENT_PRIORITY,
             profiler=profiler,
+            wiredOR=wired_or,
         )
         
         # Create sequencer
@@ -207,6 +213,8 @@ def create_system(
             cache_access_latency=options.l2_latency,
             profiler=profiler,
             maxOutstandingMemRequests=1,
+            controller_event_priority=L2_CONTROLLER_EVENT_PRIORITY,
+            wiredOR=wired_or,
         )
 
         # Set L2 controller in ruby system
@@ -251,6 +259,7 @@ def create_system(
         transitions_per_cycle=16,
         clk_domain=ruby_system.clk_domain,
         ruby_system=ruby_system,
+        controller_event_priority=DIR_CONTROLLER_EVENT_PRIORITY,
     )
 
     # Set directory in ruby system

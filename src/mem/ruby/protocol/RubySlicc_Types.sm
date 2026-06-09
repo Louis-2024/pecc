@@ -279,3 +279,9 @@ structure(CustomProfiler, external="yes") {
     void profileL2Writes();
     void profileRepetitiveL2Writes();
 }
+
+// Shared wired-OR line
+structure(WiredOR, external="yes") {
+    void setWiredORLine(bool l1Owned);
+    bool readAndClearWiredORLine();
+}

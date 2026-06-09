@@ -65,6 +65,7 @@ python_class_map = {
                     "RubyPrefetcher":"RubyPrefetcher",
                     "Cycles":"Cycles",
                     "CustomProfiler":"CustomProfiler",
+                    "WiredOR":"WiredOR",
                    }
 
 class StateMachine(Symbol):

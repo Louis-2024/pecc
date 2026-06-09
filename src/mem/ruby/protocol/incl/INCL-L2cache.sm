@@ -27,6 +27,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     // Profiler
     CustomProfiler *profiler;
+    WiredOR *wiredOR;
 
 {
 
@@ -204,6 +205,12 @@ machine(MachineType:L2Cache, "LLC") :
         return avail;
     }
 
+    bool readAndClearWiredORLine() {
+        bool l1Owned := wiredOR.readAndClearWiredORLine();
+        DPRINTF(FlexLLC, "readAndClearWiredORLine: L1Owned = %d \n", l1Owned);
+        return l1Owned;
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // NETWORK PORTS
     ////////////////////////////////////////////////////////////////////////////
@@ -238,6 +245,12 @@ machine(MachineType:L2Cache, "LLC") :
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
                 if (in_msg.type == CoherenceRequestType:GetS) {
+
+                    bool L1Owned := readAndClearWiredORLine();
+                    if (L1Owned) {
+                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned);
+                    }
+
                     // GetS
                     if (cacheMemory.isTagPresent(in_msg.addr)) {
                         DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
@@ -262,6 +275,12 @@ machine(MachineType:L2Cache, "LLC") :
                         }
                     }
                 } else if (in_msg.type == CoherenceRequestType:GetM) {
+
+                    bool L1Owned := readAndClearWiredORLine();
+                    if (L1Owned) {
+                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned);
+                    }
+                    
                     DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                     trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.type == CoherenceRequestType:Put) {
@@ -467,7 +486,6 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.addNetDest(tbe.requestors);
                 out_msg.dataBlk := in_msg.DataBlk;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
-                out_msg.invalidate := false;
             }
             DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, tbe.requestors);
         }
