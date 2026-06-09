@@ -27,6 +27,8 @@ machine(MachineType:L2Cache, "LLC") :
 
     // Profiler
     CustomProfiler *profiler;
+
+    // WiredOR
     WiredOR *wiredOR;
 
 {
@@ -75,8 +77,6 @@ machine(MachineType:L2Cache, "LLC") :
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
         Addr from_addr, desc="Address of request that triggers replacement";
         bool writeback_triggered, desc="Indicator of chained eviction";
-        bool latchedL1Owned, default="false", desc="Latched wired-OR sample for current request";
-        bool latchedL1OwnedValid, default="false", desc="Whether wired-OR has been sampled";
     }
 
     // Cache entry
@@ -102,6 +102,8 @@ machine(MachineType:L2Cache, "LLC") :
     TBETable TBEs, template="<L2Cache_TBE>", constructor="m_number_of_TBEs";
 
     int numOutstandingMemRequests, default="0";
+    bool latchedL1Owned, default="false";
+    bool headRequestL1OwnedEnqueued, default="false";
 
     ////////////////////////////////////////////////////////////////////////////
     // FUNCTIONS
@@ -188,9 +190,38 @@ machine(MachineType:L2Cache, "LLC") :
         }
     }
 
+    void enqueueQueuedL1Owned() {
+        NodeID bank := machineIDToNodeID(machineID);
+        bool l1Owned := wiredOR.enqueueL1OwnedSample(bank);
+        DPRINTF(FlexLLC, "enqueueL1Owned: Bank = %d, L1Owned = %d \n", bank, l1Owned);
+    }
+
+    bool dequeueQueuedL1Owned() {
+        NodeID bank := machineIDToNodeID(machineID);
+        bool l1Owned := wiredOR.dequeueL1OwnedSample(bank);
+        DPRINTF(FlexLLC, "dequeueL1Owned: Bank = %d, L1Owned = %d \n", bank, l1Owned);
+        return l1Owned;
+    }
+
     bool _checkResourceAvailable(RequestType request_type, Addr addr) {
         if (request_type == RequestType:BankAccess) {
-            return cacheMemory.checkResourceAvailable(CacheResourceType:DataArray, addr);
+            bool avail := cacheMemory.checkResourceAvailable(CacheResourceType:DataArray, addr);
+            if (avail) {
+                if (!wiredOR.queueEmpty(machineIDToNodeID(machineID))) {
+                    latchedL1Owned := dequeueQueuedL1Owned();
+
+
+                    // sanity check
+                    if (latchedL1Owned) {
+                        assert(getDirectoryEntry(addr).state == State:L2I_L1Owned || getDirectoryEntry(addr).state == State:L2IL1Owned_D);
+                    }
+
+
+                } else {
+                    latchedL1Owned := false;
+                }
+            } 
+            return avail;
         } else if (request_type == RequestType:MemAccess) {
             return (numOutstandingMemRequests < maxOutstandingMemRequests);
         } else {
@@ -209,17 +240,6 @@ machine(MachineType:L2Cache, "LLC") :
 
     NodeID getL2BankId() {
         return machineIDToNodeID(machineID);
-    }
-
-    bool getL1OwnedForRequest(Addr addr) {
-        Entry dir_entry := getDirectoryEntry(addr);
-        if (!dir_entry.latchedL1OwnedValid) {
-            NodeID bank := getL2BankId();
-            dir_entry.latchedL1Owned := wiredOR.readAndClearWiredORLine(bank);
-            dir_entry.latchedL1OwnedValid := true;
-            DPRINTF(FlexLLC, "sampleL1Owned: Address = %#x, Bank = %d, L1Owned = %d \n", addr, bank, dir_entry.latchedL1Owned);
-        }
-        return dir_entry.latchedL1Owned;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -255,13 +275,11 @@ machine(MachineType:L2Cache, "LLC") :
                 DPRINTF(RubySlicc, "Request port: see input message %s\n", in_msg);
                 CacheEntry cache_entry := getCacheEntry(in_msg.addr);
                 TBE tbe := TBEs[in_msg.addr];
+                if (!headRequestL1OwnedEnqueued) {
+                    enqueueQueuedL1Owned();
+                    headRequestL1OwnedEnqueued := true;
+                }
                 if (in_msg.type == CoherenceRequestType:GetS) {
-
-                    bool L1Owned := getL1OwnedForRequest(in_msg.addr);
-                    if (L1Owned) {
-                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned || getDirectoryEntry(in_msg.addr).state == State:L2IL1Owned_D);
-                    }
-
                     // GetS
                     if (cacheMemory.isTagPresent(in_msg.addr)) {
                         DPRINTF(FlexLLC, "GetS: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
@@ -286,12 +304,6 @@ machine(MachineType:L2Cache, "LLC") :
                         }
                     }
                 } else if (in_msg.type == CoherenceRequestType:GetM) {
-
-                    bool L1Owned := getL1OwnedForRequest(in_msg.addr);
-                    if (L1Owned) {
-                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned || getDirectoryEntry(in_msg.addr).state == State:L2IL1Owned_D);
-                    }
-                    
                     DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                     trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.type == CoherenceRequestType:Put) {
@@ -509,9 +521,8 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     action(popRequestQueue, desc="Pop the request queue") {
-        Entry dir_entry := getDirectoryEntry(address);
-        dir_entry.latchedL1OwnedValid := false;
         requestInPort.dequeue(clockEdge());
+        headRequestL1OwnedEnqueued := false;
     }
 
     action(wakeUpAllQueues, desc="...") {
@@ -590,13 +601,13 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(L2I, GetS_NI, L2I_D) {MemAccess} {
+    transition(L2I, GetS_NI, L2I_D) {BankAccess, MemAccess} {
         allocateTBE;
         sendMemRead;
         popRequestQueue;
     }
 
-    transition(L2I, GetM, L2IL1Owned_D) {MemAccess} {
+    transition(L2I, GetM, L2IL1Owned_D) {BankAccess, MemAccess} {
         allocateTBE;
         sendMemRead;
         popRequestQueue;

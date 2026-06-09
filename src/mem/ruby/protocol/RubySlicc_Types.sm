@@ -284,4 +284,7 @@ structure(CustomProfiler, external="yes") {
 structure(WiredOR, external="yes") {
     void setWiredORLine(NodeID bank, bool l1Owned);
     bool readAndClearWiredORLine(NodeID bank);
+    bool enqueueL1OwnedSample(NodeID bank);
+    bool dequeueL1OwnedSample(NodeID bank);
+    bool queueEmpty(NodeID bank);
 }
