@@ -259,7 +259,7 @@ machine(MachineType:L2Cache, "LLC") :
 
                     bool L1Owned := getL1OwnedForRequest(in_msg.addr);
                     if (L1Owned) {
-                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned);
+                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned || getDirectoryEntry(in_msg.addr).state == State:L2IL1Owned_D);
                     }
 
                     // GetS
@@ -289,7 +289,7 @@ machine(MachineType:L2Cache, "LLC") :
 
                     bool L1Owned := getL1OwnedForRequest(in_msg.addr);
                     if (L1Owned) {
-                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned);
+                        assert(getDirectoryEntry(in_msg.addr).state == State:L2I_L1Owned || getDirectoryEntry(in_msg.addr).state == State:L2IL1Owned_D);
                     }
                     
                     DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
@@ -611,7 +611,7 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    transition(L2I, Upgrade, L2I_L1Owned) {
+    transition(L2I, Upgrade, L2I_L1Owned) {BankAccess} {
         popRequestQueue;
     }
 
@@ -660,7 +660,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from L2I_L1Owned
 
-    transition(L2I_L1Owned, {GetS, GetS_NI, GetM, Upgrade}) {
+    transition(L2I_L1Owned, {GetS, GetS_NI, GetM, Upgrade}) {BankAccess} {
         popRequestQueue;
     }
 
@@ -682,27 +682,27 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(L2I_D, GetS_NI) {
+    transition(L2I_D, GetS_NI) {BankAccess} {
         addRequestorToMemReq;
         popRequestQueue;
     }
 
-    transition(L2I_D, GetM, L2IL1Owned_D) {
+    transition(L2I_D, GetM, L2IL1Owned_D) {BankAccess} {
         addRequestorToMemReq;
         popRequestQueue;
     }
 
-    transition(L2I_D, Upgrade, L2IL1Owned_D) {
+    transition(L2I_D, Upgrade, L2IL1Owned_D) {BankAccess} {
         popRequestQueue;
     }
 
-    transition(L2IL1Owned_D, Upgrade) {
+    transition(L2IL1Owned_D, Upgrade) {BankAccess} {
         popRequestQueue;
     }
 
     // L2IL1Owned_D
 
-    transition(L2IL1Owned_D, {GetS, GetS_NI, GetM}) {
+    transition(L2IL1Owned_D, {GetS, GetS_NI, GetM}) {BankAccess} {
         popRequestQueue;
     }
 
@@ -712,12 +712,12 @@ machine(MachineType:L2Cache, "LLC") :
         deallocateCacheBlock;
     }
 
-    transition(L2V_D, {GetS, GetS_NI}) {
+    transition(L2V_D, {GetS, GetS_NI}) {BankAccess} {
         addRequestorToMemReq;
         popRequestQueue;
     }
 
-    transition(L2V_D, GetM, L2IL1Owned_D) {
+    transition(L2V_D, GetM, L2IL1Owned_D) {BankAccess} {
         setDirty;
         addRequestorToMemReq;
         deallocateCacheBlock;
