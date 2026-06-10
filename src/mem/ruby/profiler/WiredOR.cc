@@ -8,26 +8,26 @@ namespace ruby
 
 WiredOR::WiredOR(const Params &p)
     : SimObject(p),
-      m_l1OwnedAddrs(p.num_banks)
+      m_l1OwnedRequests(p.num_banks)
 {
 }
 
 void
-WiredOR::addL1OwnedAddr(NodeID bank, Addr addr)
+WiredOR::addL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester)
 {
-    m_l1OwnedAddrs[bank].insert(addr);
+    m_l1OwnedRequests[bank].insert({reqID, requester});
 }
 
 bool
-WiredOR::isL1OwnedAddr(NodeID bank, Addr addr)
+WiredOR::isL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester)
 {
-    return m_l1OwnedAddrs[bank].count(addr) != 0;
+    return m_l1OwnedRequests[bank].count({reqID, requester}) != 0;
 }
 
 void
-WiredOR::removeL1OwnedAddr(NodeID bank, Addr addr)
+WiredOR::removeL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester)
 {
-    m_l1OwnedAddrs[bank].erase(addr);
+    m_l1OwnedRequests[bank].erase({reqID, requester});
 }
 
 } // namespace ruby

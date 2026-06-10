@@ -280,9 +280,9 @@ structure(CustomProfiler, external="yes") {
     void profileRepetitiveL2Writes();
 }
 
-// Per-bank L1-owned address tracking
+// Per-bank L1-owned request tracking
 structure(WiredOR, external="yes") {
-    void addL1OwnedAddr(NodeID bank, Addr addr);
-    bool isL1OwnedAddr(NodeID bank, Addr addr);
-    void removeL1OwnedAddr(NodeID bank, Addr addr);
+    void addL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+    bool isL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+    void removeL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
 }
