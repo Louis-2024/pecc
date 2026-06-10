@@ -97,7 +97,8 @@ def create_system(
     l2_bits = int(math.log(num_llc_banks, 2))
 
     profiler = CustomProfiler()
- 
+    wired_or = WiredOR(num_banks=num_llc_banks)
+
     # Create L1 cache controller
     for i in range(options.num_cpus):
 
@@ -131,6 +132,7 @@ def create_system(
             mandatory_queue_latency=options.l1_latency,
             number_of_TBEs=1,
             profiler=profiler,
+            wiredOR=wired_or,
         )
         
         # Create sequencer
@@ -208,6 +210,7 @@ def create_system(
             cache_access_latency=options.l2_latency,
             profiler=profiler,
             maxOutstandingMemRequests=1,
+            wiredOR=wired_or,
         )
 
         # Set L2 controller in ruby system

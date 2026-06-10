@@ -37,6 +37,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     // Profiler
     CustomProfiler *profiler;
+
+    // WiredOR
     WiredOR *wiredOR;
 
 {
