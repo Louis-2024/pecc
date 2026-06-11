@@ -921,7 +921,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popResponseQueue;
     }
 
-    transition({M, E}, Store) {
+    transition({M, E}, Store, M) {
         setDirty;
         storeHit;
         popMandatoryQueue;

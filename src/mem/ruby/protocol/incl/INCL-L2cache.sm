@@ -546,6 +546,9 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.addNetDest(tbe.requestors);
                 out_msg.dataBlk := in_msg.DataBlk;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
+                out_msg.owned := tbe.owned;
+                out_msg.exclusive := tbe.exclusive;
+                out_msg.dirty := false;
             }
             DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, tbe.requestors);
         }
