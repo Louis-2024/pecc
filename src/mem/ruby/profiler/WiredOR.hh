@@ -17,30 +17,30 @@ namespace gem5
 namespace ruby
 {
 
-struct L1OwnedRequestHash
+struct L1RequestHash
 {
-    size_t
-    operator()(const std::pair<Cycles, NodeID> &request) const
-    {
-        return std::hash<uint64_t>()(
-                   static_cast<uint64_t>(request.first)) ^
-               (std::hash<NodeID>()(request.second) << 1);
+    size_t operator()(const std::pair<Cycles, NodeID> &request) const {
+        return std::hash<uint64_t>()(static_cast<uint64_t>(request.first)) ^ (std::hash<NodeID>()(request.second) << 1);
     }
 };
 
 class WiredOR : public SimObject
 {
-  public:
-    typedef WiredORParams Params;
-    WiredOR(const Params &p);
+    public:
+        typedef WiredORParams Params;
+        WiredOR(const Params &p);
 
-    void addL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
-    bool isL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
-    void removeL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+        void addL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+        bool isL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+        void removeL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
 
-  private:
-    std::vector<std::unordered_set<
-        std::pair<Cycles, NodeID>, L1OwnedRequestHash>> m_l1OwnedRequests;
+        void addL1HeldRequest(NodeID bank, Cycles reqID, NodeID requester);
+        bool isL1HeldRequest(NodeID bank, Cycles reqID, NodeID requester);
+        void removeL1HeldRequest(NodeID bank, Cycles reqID, NodeID requester);
+
+    private:
+        std::vector<std::unordered_set<std::pair<Cycles, NodeID>, L1RequestHash>> m_l1OwnedRequests;
+        std::vector<std::unordered_set<std::pair<Cycles, NodeID>, L1RequestHash>> m_l1HeldRequests;
 };
 
 } // namespace ruby

@@ -285,4 +285,8 @@ structure(WiredOR, external="yes") {
     void addL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
     bool isL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
     void removeL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+
+    void addL1HeldRequest(NodeID bank, Cycles reqID, NodeID requester);
+    bool isL1HeldRequest(NodeID bank, Cycles reqID, NodeID requester);
+    void removeL1HeldRequest(NodeID bank, Cycles reqID, NodeID requester);
 }

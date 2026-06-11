@@ -54,6 +54,10 @@ structure(ResponseMsg, desc="Response message", interface="Message") {
     MachineID                           sender,            desc="Sender of the response";
     NetDest                             Destination,       desc="Multicast destination mask";
     MessageSizeType                     MessageSize,       desc="size category of the message";
+
+    bool                                owned,             desc="";
+    bool                                dirty,             desc="";
+    bool                                exclusive,         desc="";
     
     bool functionalRead(Packet *pkt) {
         if ((MessageSize == MessageSizeType:Response_Data))  {
