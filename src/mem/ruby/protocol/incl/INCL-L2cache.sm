@@ -668,6 +668,13 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
+    transition(L2V, Put) {BankAccess} {
+        setDirty;
+        writeDataToCache;
+        sendAck;
+        popRequestQueue;
+    }
+
     transition(L2I, Put, L2V) {BankAccess} {
         allocateCacheBlock;
         setDirty;

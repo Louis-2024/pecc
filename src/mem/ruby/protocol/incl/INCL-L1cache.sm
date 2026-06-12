@@ -144,6 +144,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         bool isLockRequest,                     desc="Indicator of lock request";
         Addr from_addr,                         desc="Address of request that triggers replacement";
         bool to_I,                              desc="Indicator of invalidation";
+        bool hardcodeNotExclusive,              desc="";
     }
 
     structure(TBETable, external="yes") {
@@ -737,13 +738,18 @@ machine(MachineType:L1Cache, "L1 Cache") :
         peek(responseInPort, ResponseMsg) {
             assert(is_valid(cache_entry));
             cache_entry.dataBlk := in_msg.dataBlk;
+            bool hardcodeNotExclusive := false;
+            if (is_valid(tbe) && tbe.hardcodeNotExclusive) {
+                hardcodeNotExclusive := true;
+            }
+
             if (in_msg.dirty) {
                 cache_entry.dirty := true;
             }
             if (in_msg.owned) {
                 cache_entry.owned := true;
             }
-            if (in_msg.exclusive) {
+            if (in_msg.exclusive && (!hardcodeNotExclusive)) {
                 cache_entry.exclusive := true;
             }
         }
@@ -790,6 +796,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
     action(setToI, desc="") {
         assert(is_valid(tbe));
         tbe.to_I := true;
+    }
+
+    action(setHardcodeNotExclusive, desc="") {
+        assert(is_valid(tbe));
+        tbe.hardcodeNotExclusive := true;
     }
 
     action(checkAndAddRequestor, desc="Add requestor") {
@@ -917,10 +928,6 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popMandatoryQueue;
     }
 
-    transition(I, DataCacheToCache) {
-        popResponseQueue;
-    }
-
     transition({M, E}, Store, M) {
         setDirty;
         storeHit;
@@ -1033,6 +1040,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(S_D, OtherGetS) {
         setL1Held;
         unsetExclusive;
+        setHardcodeNotExclusive;
         checkAndAddRequestor;
         popRequestQueue;
     }
@@ -1202,12 +1210,12 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     // Transition on finalizing transaction
 
-    transition({CMP, S, M, M_A, ML_A}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
-        popResponseQueue;
-    }
     transition(CMP, Complete, *) {
         finalizeTransaction;
         popTriggerQueue;
     }
 
+    transition({CMP, M, O, E, S, I, S_AD, M_AD, ML_AD, M_A, ML_A, I_AD, I_D}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
+        popResponseQueue;
+    }
 }
