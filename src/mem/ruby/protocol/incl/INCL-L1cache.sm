@@ -1059,6 +1059,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition({M_D, ML_D, L}, OtherGetS) {
         setL1Owned;
         unsetExclusive;
+        setHardcodeNotExclusive;
         checkAndAddRequestor;
         popRequestQueue;
     }

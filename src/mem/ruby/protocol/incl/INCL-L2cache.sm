@@ -379,6 +379,7 @@ machine(MachineType:L2Cache, "LLC") :
     action(deallocateTBE, desc="Deallocate TBE after memory read") {
         assert(is_valid(tbe));
         tbe.requestors.clear();
+        tbe.owned := false;
         tbe.exclusive := false;
         TBEs.deallocate(address);
         unset_tbe();
