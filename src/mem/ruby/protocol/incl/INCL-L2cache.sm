@@ -39,9 +39,10 @@ machine(MachineType:L2Cache, "LLC") :
 
     state_declaration(State, desc="State", default="L2Cache_State_L2I") {
         L2I, AccessPermission:Invalid, desc="";
-        L2I_D, AccessPermission:Busy, desc="for GetS_NI / GetM";
-        L2V, AccessPermission:Read_Only, desc="";
-        L2V_D, AccessPermission:Busy, desc="for GetS";
+        L2I_D, AccessPermission:Busy, desc="";
+        L2C, AccessPermission:Read_Only, desc="";
+        L2C_D, AccessPermission:Busy, desc="";
+        L2D, AccessPermission:Read_Only, desc="";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -60,7 +61,9 @@ machine(MachineType:L2Cache, "LLC") :
 
         Mem_Response, desc="";
         Mem_Ack, desc="";
+
         Dont_Care, desc="";
+        Dont_Care_Deallocate, desc="";
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -277,8 +280,8 @@ machine(MachineType:L2Cache, "LLC") :
                     }
                 } else if (in_msg.type == CoherenceRequestType:GetM) {
                     if (isL1OwnedRequest(in_msg.reqID, machineIDToNodeID(in_msg.requestor))) {
-                        DPRINTF(FlexLLC, "Dont_Care: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                        trigger(Event:Dont_Care, in_msg.addr, cache_entry, tbe);
+                        DPRINTF(FlexLLC, "Dont_Care_Deallocate: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                        trigger(Event:Dont_Care_Deallocate, in_msg.addr, cache_entry, tbe);
                     } else {
                         DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                         trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
@@ -334,6 +337,13 @@ machine(MachineType:L2Cache, "LLC") :
         assert(is_valid(cache_entry));
         cacheMemory.deallocate(address);
         unset_cache_entry();
+    }
+
+    action(deallocateCacheBlockIfValid, desc="Deallocate a cache block if valid") {
+        if (is_valid(cache_entry)) {
+            cacheMemory.deallocate(address);
+            unset_cache_entry();
+        }
     }
 
     action(writeDataToCache, desc="Write data to cache") {
@@ -468,6 +478,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.add(in_msg.requestor);
                 out_msg.dataBlk := cache_entry.dataBlk;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
+                out_msg.dirty := cache_entry.dirty;
             }
             DPRINTF(FlexLLC, "sendDataToL1: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
         }
@@ -486,6 +497,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.addNetDest(tbe.requestors);
                 out_msg.dataBlk := in_msg.DataBlk;
                 out_msg.MessageSize := MessageSizeType:Response_Data;
+                out_msg.dirty := false;
             }
             DPRINTF(FlexLLC, "forwardMemResponse: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, in_msg.Sender, tbe.requestors);
         }
@@ -552,7 +564,7 @@ machine(MachineType:L2Cache, "LLC") :
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
 
-    transition({L2I, L2V, L2I_D, L2V_D}, Mem_Ack) {
+    transition({L2I, L2I_D, L2C, L2C_D, L2D}, Mem_Ack) {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
         forwardAck;
@@ -563,14 +575,14 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transactions from L2I
 
-    transition(L2I, GetS, L2V_D) {BankAccess, MemAccess} {
+    transition(L2I, GetS, L2C_D) {BankAccess, MemAccess} {
         allocateCacheBlock;
         allocateTBE;
         sendMemRead;
         popRequestQueue;
     }
 
-    transition(L2V_D, Mem_Response, L2V) {
+    transition(L2C_D, Mem_Response, L2C) {
         decrementOutstandingMemRequest;
         writeMemResponseToCache;
         forwardMemResponse;
@@ -596,7 +608,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(L2I, Put, L2V) {BankAccess} {
+    transition(L2I, Put, L2D) {BankAccess} {
         allocateCacheBlock;
         setDirty;
         writeDataToCache;
@@ -613,32 +625,38 @@ machine(MachineType:L2Cache, "LLC") :
         wakeUpAllQueues;
     }
 
-    // transitions from L2V
+    // transitions from L2C/L2D
 
-    transition(L2V, GetS) {BankAccess} {
+    transition(L2C, GetS) {BankAccess} {
         sendDataToL1;
         popRequestQueue;
     }
 
-    transition(L2V, GetM, L2I) {BankAccess} {
+    transition(L2D, GetS, L2I) {BankAccess} {
+        sendDataToL1;
+        deallocateCacheBlock;
+        popRequestQueue;
+    }
+
+    transition({L2C, L2D}, GetM, L2I) {BankAccess} {
         setDirty;
         sendDataToL1;
         deallocateCacheBlock;
         popRequestQueue;
     }
 
-    transition(L2V, Upgrade, L2I) {BankAccess} {
+    transition({L2C, L2D}, Upgrade, L2I) {BankAccess} {
         setDirty;
         deallocateCacheBlock;
         popRequestQueue;
     }
 
-    transition(L2V, Replacement_Silent, L2I) {BankAccess} {
+    transition(L2C, Replacement_Silent, L2I) {BankAccess} {
         assertClean;
         deallocateCacheBlock;
     }
 
-    transition(L2V, Replacement_Writeback, L2I) {BankAccess, MemAccess} {
+    transition(L2D, Replacement_Writeback, L2I) {BankAccess, MemAccess} {
         assertDirty;
         setClean;
         allocateTBE;
@@ -651,7 +669,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     // L2I_D
 
-    transition(L2I_D, GetS, L2V_D) {BankAccess} {
+    transition(L2I_D, GetS, L2C_D) {BankAccess} {
         allocateCacheBlock;
         addRequestorToMemReq;
         popRequestQueue;
@@ -671,25 +689,25 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    // L2V_D
+    // L2C_D
 
-    transition(L2V_D, Replacement_Silent, L2I_D) {BankAccess} {
+    transition(L2C_D, Replacement_Silent, L2I_D) {BankAccess} {
         deallocateCacheBlock;
     }
 
-    transition(L2V_D, {GetS, GetS_NI}) {BankAccess} {
+    transition(L2C_D, {GetS, GetS_NI}) {BankAccess} {
         addRequestorToMemReq;
         popRequestQueue;
     }
 
-    transition(L2V_D, GetM, L2I_D) {BankAccess} {
+    transition(L2C_D, GetM, L2I_D) {BankAccess} {
         setDirty;
         addRequestorToMemReq;
         deallocateCacheBlock;
         popRequestQueue;
     }
 
-    transition(L2V_D, Upgrade, L2I_D) {BankAccess} {
+    transition(L2C_D, Upgrade, L2I_D) {BankAccess} {
         setDirty;
         deallocateCacheBlock;
         popRequestQueue;
@@ -697,7 +715,18 @@ machine(MachineType:L2Cache, "LLC") :
 
     // Dont_Care
 
-    transition({L2I, L2I_D, L2V, L2V_D}, Dont_Care) {BankAccess} {
+    transition({L2I, L2I_D, L2C, L2C_D, L2D}, Dont_Care) {BankAccess} {
         popRequestQueue;
     }
+
+    transition({L2I, L2C, L2D}, Dont_Care_Deallocate, L2I) {BankAccess} {
+        deallocateCacheBlockIfValid;
+        popRequestQueue;
+    }
+
+    transition({L2I_D, L2C_D}, Dont_Care_Deallocate, L2I_D) {BankAccess} {
+        deallocateCacheBlockIfValid;
+        popRequestQueue;
+    }
+
 }
