@@ -54,7 +54,9 @@ machine(MachineType:L2Cache, "LLC") :
 
     enumeration(Event, desc="Cache events") {
         GetS, desc="";
+        GetS_NI, desc="";
         GetM, desc="";
+        GetM_NI, desc="";
         Upgrade, desc="";
 
         Put, desc="";
@@ -261,9 +263,8 @@ machine(MachineType:L2Cache, "LLC") :
                                 DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
                                 trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
                             } else {
-                                // replacement with writeback
-                                DPRINTF(FlexLLC, "Replacement_Writeback: Address = %#x \n", victim_addr);
-                                trigger(Event:Replacement_Writeback, victim_addr, victim_entry, victim_tbe);
+                                DPRINTF(FlexLLC, "GetS_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:GetS_NI, in_msg.addr, cache_entry, tbe);
                             }
                         }
                     }
@@ -288,9 +289,8 @@ machine(MachineType:L2Cache, "LLC") :
                                 DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
                                 trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
                             } else {
-                                // replacement with writeback
-                                DPRINTF(FlexLLC, "Replacement_Writeback: Address = %#x \n", victim_addr);
-                                trigger(Event:Replacement_Writeback, victim_addr, victim_entry, victim_tbe);
+                                DPRINTF(FlexLLC, "GetM_NI: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                                trigger(Event:GetM_NI, in_msg.addr, cache_entry, tbe);
                             }
                         }
                     }
@@ -586,8 +586,20 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
+    transition(L2I_L1NotOwned, GetS_NI, L2I_L1NotOwned_D) {MemAccess} {
+        allocateTBE;
+        sendMemRead;
+        popRequestQueue;
+    }
+
     transition(L2I_L1NotOwned, GetM, L2V_L1Owned_D) {BankAccess, MemAccess} {
         allocateCacheBlock;
+        allocateTBE;
+        sendMemRead;
+        popRequestQueue;
+    }
+
+    transition(L2I_L1NotOwned, GetM_NI, L2I_L1Owned_D) {MemAccess} {
         allocateTBE;
         sendMemRead;
         popRequestQueue;
@@ -648,7 +660,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from L2I_L1Owned
 
-    transition(L2I_L1Owned, {GetS, GetM, Upgrade}) {
+    transition(L2I_L1Owned, {GetS, GetS_NI, GetM, GetM_NI, Upgrade}) {
         popRequestQueue;
     }
 
@@ -708,7 +720,17 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
+    transition(L2I_L1NotOwned_D, GetS_NI) {
+        addRequestorToMemReq;
+        popRequestQueue;
+    }
+
     transition(L2I_L1NotOwned_D, GetM, L2V_L1Owned_D) {
+        addRequestorToMemReq;
+        popRequestQueue;
+    }
+
+    transition(L2I_L1NotOwned_D, GetM_NI, L2I_L1Owned_D) {
         addRequestorToMemReq;
         popRequestQueue;
     }
@@ -723,7 +745,7 @@ machine(MachineType:L2Cache, "LLC") :
 
     // L2I_L1Owned_D
 
-    transition(L2I_L1Owned_D, {GetS, GetM}) {
+    transition(L2I_L1Owned_D, {GetS, GetS_NI, GetM, GetM_NI}) {
         popRequestQueue;
     }
 
