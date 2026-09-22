@@ -43,7 +43,7 @@ machine(MachineType:L2Cache, "LLC") :
         InMem, AccessPermission:Invalid, desc="Cache line data is in memory, not in caching hierarchy";
         V_Clean, AccessPermission:Read_Only, desc="Cache line clean and owned by LLC";
         V_Dirty, AccessPermission:Read_Only, desc="Cache line dirty and owned by LLC";
-        EorOorM, AccessPermission:Maybe_Stale, desc="Cache line is in E/O/M state in L1";
+        OorM, AccessPermission:Maybe_Stale, desc="Cache line is in O/M state in L1";
 
         // transient state for observing own invalidation message first and waiting for writeback data
         MI_D, AccessPermission:Busy, desc="Observed own invalidation message, waiting for data response";
@@ -573,7 +573,7 @@ machine(MachineType:L2Cache, "LLC") :
     // TRANSITIONS
     ////////////////////////////////////////////////////////////////////////////
 
-    transition({EorOorM, V_Clean, V_Dirty}, Replacement) {BankAccess} {
+    transition({OorM, V_Clean, V_Dirty}, Replacement) {BankAccess} {
         checkAndInitiateReplacement;
     }
 
@@ -581,7 +581,7 @@ machine(MachineType:L2Cache, "LLC") :
         stallAndWaitRequestQueue;
     }
 
-    transition({EorOorM, V_Clean, V_Dirty}, {Writeback_Data_Clean, Writeback_Data_Dirty}) {
+    transition({OorM, V_Clean, V_Dirty}, {Writeback_Data_Clean, Writeback_Data_Dirty}) {
         stallAndWaitResponseQueue;
     }
 
@@ -589,12 +589,12 @@ machine(MachineType:L2Cache, "LLC") :
         stallAndWaitRequestQueue;
     }
 
-    transition({EorOorM, V_Clean, V_Dirty}, BusGrant) {
+    transition({OorM, V_Clean, V_Dirty}, BusGrant) {
         sendInv;
         popBusGrantQueue;
     }
 
-    transition(EorOorM, OwnInv, MI_D) {
+    transition(OorM, OwnInv, MI_D) {
         popRequestQueue;
         wakeUpResponseQueue;
     }
@@ -631,27 +631,27 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition({V_Clean, V_Dirty}, GetM, EorOorM) {BankAccess} {
+    transition({V_Clean, V_Dirty}, GetM, OorM) {BankAccess} {
         sendData;
         popRequestQueue;
     }
 
-    transition({V_Clean, V_Dirty}, Upg, EorOorM) {BankAccess} {
+    transition({V_Clean, V_Dirty}, Upg, OorM) {BankAccess} {
         popRequestQueue;
     }
 
-    transition(EorOorM, Put_Clean, V_Clean) {BankAccess} {
+    transition(OorM, Put_Clean, V_Clean) {BankAccess} {
         sendAck;
         popRequestQueue;
     }
 
-    transition(EorOorM, Put_Dirty, V_Dirty) {BankAccess} {
+    transition(OorM, Put_Dirty, V_Dirty) {BankAccess} {
         writePutData;
         sendAck;
         popRequestQueue;
     }
 
-    transition(EorOorM, {GetS, GetM, Upg}) {
+    transition(OorM, {GetS, GetM, Upg}) {
         popRequestQueue;
     }
 
@@ -659,7 +659,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(MemReadPending, Mem_Response, EorOorM) {BankAccess} {
+    transition(MemReadPending, Mem_Response, OorM) {BankAccess} {
         decrementOutstandingMemRequest;
         writeMemResponse;
         forwardMemResponse;
