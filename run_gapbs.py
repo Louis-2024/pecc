@@ -6,14 +6,14 @@ import tqdm
 from multiprocessing.pool import Pool
 
 GAPBS_WORKLOADS = {
-    "bfs": "-u 18 -k 18 -n 1",
-    "bc": "-u 18 -k 10 -n 1 -i 2",
-    "cc": "-u 18 -k 18 -n 1",
-    "cc_sv": "-u 18 -k 18 -n 1",
+    "bfs": "-u 20 -k 4 -n 1",
+    "bc": "-u 20 -k 4 -n 1 -i 2",
+    "cc": "-u 20 -k 4 -n 1",
+    "cc_sv": "-u 20 -k 4 -n 1",
     "pr": "-u 18 -k 18 -n 1 -i 10 -t 1e-4",
     "pr_spmv": "-u 18 -k 18 -n 1 -i 10 -t 1e-4",
     "sssp": "-u 18 -k 10 -n 1 -d 2",
-    "tc": "-u 18 -k 10 -n 1",
+    "tc": "-u 20 -k 4 -n 1",
 }
 
 def generate_gapbs_command(
