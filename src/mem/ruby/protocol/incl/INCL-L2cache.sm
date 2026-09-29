@@ -361,6 +361,7 @@ machine(MachineType:L2Cache, "LLC") :
             tbe.requestors.clear();
             tbe.requestors.add(in_msg.requestor);
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
+                out_msg.reqID := curCycle();
                 out_msg.addr := in_msg.addr;
                 out_msg.Type := MemoryRequestType:MEMORY_READ;
                 out_msg.Sender := in_msg.requestor;
@@ -390,6 +391,7 @@ machine(MachineType:L2Cache, "LLC") :
             Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
             from_dir_entry.writeback_triggered := true;
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
+                out_msg.reqID := curCycle();
                 out_msg.addr := address;
                 out_msg.Type := MemoryRequestType:MEMORY_WB;
                 out_msg.Sender := machineID;

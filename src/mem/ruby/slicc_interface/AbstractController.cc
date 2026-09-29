@@ -266,6 +266,38 @@ AbstractController::serviceMemoryQueue()
         return false;
     }
 
+// #ifdef SNOOPING_BUS
+    MsgPtr oldest_msg;
+    Cycles oldest_id(0);
+    for (const auto &msg_ptr : mem_queue->m_prio_heap) {
+        auto *candidate = dynamic_cast<MemoryMsg *>(msg_ptr.get());
+        assert(candidate);
+
+        if (candidate->getLastEnqueueTime() > clockEdge()) {
+            continue;
+        }
+
+        if (!oldest_msg ||
+            candidate->m_reqID < oldest_id ||
+            (candidate->m_reqID == oldest_id &&
+             (candidate->getLastEnqueueTime() <
+                  oldest_msg->getLastEnqueueTime() ||
+              (candidate->getLastEnqueueTime() ==
+                   oldest_msg->getLastEnqueueTime() &&
+               candidate->getMsgCounter() <
+                   oldest_msg->getMsgCounter())))) {
+            oldest_msg = msg_ptr;
+            oldest_id = candidate->m_reqID;
+        }
+    }
+    assert(oldest_msg);
+    while (mem_queue->peekMsgPtr() != oldest_msg) {
+        assert(mem_queue->isReady(clockEdge()));
+        mem_queue->delayHead(clockEdge(), 1);
+    }
+    DPRINTF(RubyQueue, "Oldest-first memory arbitration selected reqID %d\n", oldest_id);
+// #endif
+
     const MemoryMsg *mem_msg = (const MemoryMsg*)mem_queue->peek();
     unsigned int req_size = RubySystem::getBlockSizeBytes();
     if (mem_msg->m_Len > 0) {

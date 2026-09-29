@@ -156,6 +156,7 @@ machine(MachineType:Directory, "Directory") :
     action(forwardMemRequest, desc="Forward memory request") {
         peek(requestInPort, DirectoryMsg) {
             enqueue(requestToMemoryOutPort, MemoryMsg, 1) {
+                out_msg.reqID := in_msg.reqID;
                 out_msg.addr := in_msg.addr;
                 out_msg.Type := in_msg.Type;
                 out_msg.Sender := in_msg.Sender;

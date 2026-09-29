@@ -86,6 +86,7 @@ structure(TriggerMsg, interface="Message") {
 
 structure(DirectoryMsg, desc="Memory message to/from directory", interface="Message") {
     // This is basically a copy of MemoryMsg with additional Destination field
+    Cycles reqID, default="Cycles(0)", desc="Age of the original coherence request";
     Addr addr,              desc="Physical address for this request";
     MemoryRequestType Type,       desc="Type of memory request (MEMORY_READ or MEMORY_WB)";
     MachineID Sender,             desc="What component sent the data";
