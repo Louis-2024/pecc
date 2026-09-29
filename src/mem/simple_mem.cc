@@ -137,34 +137,19 @@ SimpleMemory::recvTimingReq(PacketPtr pkt)
     Tick receive_delay = pkt->headerDelay + pkt->payloadDelay;
     pkt->headerDelay = pkt->payloadDelay = 0;
 
-    // update the release time according to the bandwidth limit, and
-    // do so with respect to the time it takes to finish this request
-    // rather than long term as it is the short term data rate that is
-    // limited for any real memory
-
-    // calculate an appropriate tick to release to not exceed
-    // the bandwidth limit
-    Tick duration = pkt->getSize() * bandwidth;
-
-    // only consider ourselves busy if there is any need to wait
-    // to avoid extra events being scheduled for (infinitely) fast
-    // memories
-    if (duration != 0) {
-        schedule(releaseEvent, curTick() + duration);
+    bool needsResponse = pkt->needsResponse();
+    const Tick access_latency = recvAtomic(pkt);
+    const Tick service_time = receive_delay + access_latency;
+    if (service_time != 0) {
+        schedule(releaseEvent, curTick() + service_time);
         isBusy = true;
     }
-
-    // go ahead and deal with the packet and put the response in the
-    // queue if there is one
-    bool needsResponse = pkt->needsResponse();
-    recvAtomic(pkt);
-    // turn packet around to go back to requestor if response expected
     if (needsResponse) {
         // recvAtomic() should already have turned packet into
         // atomic response
         assert(pkt->isResponse());
 
-        Tick when_to_send = curTick() + receive_delay + getLatency();
+        Tick when_to_send = curTick() + receive_delay + access_latency;
 
         // typically this should be added at the end, so start the
         // insertion sort with the last element, also make sure not to

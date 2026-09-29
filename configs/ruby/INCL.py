@@ -206,7 +206,7 @@ def create_system(
             ruby_system=ruby_system,
             cache_access_latency=options.l2_latency,
             profiler=profiler,
-            maxOutstandingMemRequests=1,
+            maxOutstandingMemRequests=64,
         )
 
         # Set L2 controller in ruby system
