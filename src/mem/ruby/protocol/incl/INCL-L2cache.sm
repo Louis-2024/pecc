@@ -440,7 +440,7 @@ machine(MachineType:L2Cache, "LLC") :
             out_msg.Destination.add(getDirectoryEntry(address).writeback_requestor);
             out_msg.MessageSize := MessageSizeType:Writeback_Control;
         }
-        DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", dir_entry.from_addr, getDirectoryEntry(dir_entry.from_addr).state, machineID, tbe.requestors);
+        DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", dir_entry.from_addr, getDirectoryEntry(dir_entry.from_addr).state, machineID, dir_entry.writeback_requestor);
     }
 
     action(sendDataToL1, desc="") {
