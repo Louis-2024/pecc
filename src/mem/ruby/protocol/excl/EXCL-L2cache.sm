@@ -72,10 +72,9 @@ machine(MachineType:L2Cache, "LLC") :
     structure(Entry, desc="Directory entry", interface="AbstractCacheEntry", main="false") {
         State state, desc="State";
         // transaction buffer fields
-        MachineID requestor, desc="Requestor";
         Cycles reqID, desc="Request ID";
         Addr from_addr, desc="Address of request that triggers replacement";
-        bool writeback_triggered, desc="Indicator of chained eviction";
+        bool put_waiting_for_mem_ack, default="false", desc="Put is blocked by a dirty LLC victim writeback";
         Cycles memReadIssueTime, desc="Performance metric monitor field";
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
 
@@ -261,18 +260,21 @@ machine(MachineType:L2Cache, "LLC") :
                     trigger(Event:Get, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.type == CoherenceRequestType:Put && in_msg.writeback) {
                     assert(is_invalid(cache_entry));
-                    if (cacheMemory.cacheAvail(in_msg.addr)) {
-                        if (in_msg.dirty) {
-                            trigger(Event:Put_Dirty, in_msg.addr, cache_entry, tbe); 
+                    Entry dir_entry := getDirectoryEntry(in_msg.addr);
+                    if (!dir_entry.put_waiting_for_mem_ack) {
+                        if (cacheMemory.cacheAvail(in_msg.addr)) {
+                            if (in_msg.dirty) {
+                                trigger(Event:Put_Dirty, in_msg.addr, cache_entry, tbe);
+                            } else {
+                                trigger(Event:Put_Clean, in_msg.addr, cache_entry, tbe);
+                            }
                         } else {
-                            trigger(Event:Put_Clean, in_msg.addr, cache_entry, tbe); 
+                            // if cache is full, select a victim to evict
+                            Addr victim_addr := cacheMemory.cacheProbe(in_msg.addr);
+                            CacheEntry victim_entry := getCacheEntry(victim_addr);
+                            TBE victim_tbe := TBEs[victim_addr];
+                            trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
                         }
-                    } else {
-                        // if cache is full, select a victim to evict
-                        Addr victim_addr := cacheMemory.cacheProbe(in_msg.addr);
-                        CacheEntry victim_entry := getCacheEntry(victim_addr);
-                        TBE victim_tbe := TBEs[victim_addr];
-                        trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
                     }
                 } else {
                     trigger(Event:DontCare_Request, in_msg.addr, cache_entry, tbe);
@@ -337,10 +339,9 @@ machine(MachineType:L2Cache, "LLC") :
             Entry dir_entry := getDirectoryEntry(address);
             dir_entry.memWriteIssueTime := curCycle();
             dir_entry.from_addr := in_msg.addr;
-            dir_entry.reqID := in_msg.reqID;
-            dir_entry.requestor := in_msg.requestor;
             Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
-            from_dir_entry.writeback_triggered := true;
+            assert(!from_dir_entry.put_waiting_for_mem_ack);
+            from_dir_entry.put_waiting_for_mem_ack := true;
 
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
                 out_msg.addr := address;
@@ -355,35 +356,25 @@ machine(MachineType:L2Cache, "LLC") :
         profiler.profileL2Reads();
     }
 
-    action(checkAndSendAck, desc="Send Put acknowledgement") {
-        Entry dir_entry := getDirectoryEntry(address);
-        if (!dir_entry.writeback_triggered) {
-            peek(requestInPort, RequestMsg) {
-                enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                    out_msg.reqID := in_msg.reqID;
-                    out_msg.addr := address;
-                    out_msg.type := CoherenceResponseType:Ack;
-                    out_msg.sender := machineID;
-                    out_msg.Destination.clear();
-                    out_msg.Destination.add(in_msg.requestor);
-                    out_msg.MessageSize := MessageSizeType:Writeback_Control;
-                }
+    action(sendAck, desc="Send Put acknowledgement") {
+        peek(requestInPort, RequestMsg) {
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := in_msg.reqID;
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:Ack;
+                out_msg.sender := machineID;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(in_msg.requestor);
+                out_msg.MessageSize := MessageSizeType:Writeback_Control;
             }
         }
-        dir_entry.writeback_triggered := false;  // reset
     }
 
-    action(forwardAck, desc="Send Put acknowledgement") {
+    action(releasePendingPut, desc="Allow the Put blocked by this writeback to execute") {
         Entry dir_entry := getDirectoryEntry(address);
-        enqueue(responseOutPort, ResponseMsg, 1) {
-            out_msg.reqID := dir_entry.reqID;
-            out_msg.addr := dir_entry.from_addr;
-            out_msg.type := CoherenceResponseType:Ack;
-            out_msg.sender := machineID;
-            out_msg.Destination.clear();
-            out_msg.Destination.add(dir_entry.requestor);
-            out_msg.MessageSize := MessageSizeType:Writeback_Control;
-        }
+        Entry from_dir_entry := getDirectoryEntry(dir_entry.from_addr);
+        assert(from_dir_entry.put_waiting_for_mem_ack);
+        from_dir_entry.put_waiting_for_mem_ack := false;
     }
 
     action(sendDataFromCache, desc="Send data from cache entry") {
@@ -440,6 +431,10 @@ machine(MachineType:L2Cache, "LLC") :
     action(decrementOutstandingMemRequest, desc="...") {
         numOutstandingMemRequests := numOutstandingMemRequests - 1;
         assert(numOutstandingMemRequests >= 0);
+    }
+
+    action(wakeUpAllQueues, desc="Wake queues after a memory request completes") {
+        wakeUpAllBuffers();
     }
 
     action(profileMemWriteLatency, desc="...") {
@@ -502,7 +497,7 @@ machine(MachineType:L2Cache, "LLC") :
         profileRepetitiveL2Writes;
         allocateCacheBlock;
         writeDataToCache;
-        checkAndSendAck;
+        sendAck;
         popRequestQueue;
     }
 
@@ -510,7 +505,7 @@ machine(MachineType:L2Cache, "LLC") :
         profileRepetitiveL2Writes;
         allocateCacheBlock;
         writeDataToCache;
-        checkAndSendAck;
+        sendAck;
         popRequestQueue;
     }
 
@@ -535,8 +530,9 @@ machine(MachineType:L2Cache, "LLC") :
     transition(MemWritePending, Mem_Ack, InMem) {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
-        forwardAck;
+        releasePendingPut;
         popMemResponseQueue;
+        wakeUpAllQueues;
     }
 
     transition(MemWritePending, Get, MemReadPending) {MemAccess} {
@@ -547,8 +543,9 @@ machine(MachineType:L2Cache, "LLC") :
     transition(MemReadPending, Mem_Ack) {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
-        forwardAck;
+        releasePendingPut;
         popMemResponseQueue;
+        wakeUpAllQueues;
     }
 
 }

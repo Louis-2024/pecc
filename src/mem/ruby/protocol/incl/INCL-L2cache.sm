@@ -70,12 +70,10 @@ machine(MachineType:L2Cache, "LLC") :
     structure(Entry, desc="Directory entry", interface="AbstractCacheEntry", main="false") {
         State state, desc="State";
         Cycles getReqID, desc="Get request ID";
-        Cycles putReqID, desc="Put request ID";
         Cycles memReadIssueTime, desc="Performance metric monitor field";
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
         Addr from_addr, desc="Address of request that triggers replacement";
-        bool writeback_triggered, desc="Indicator of chained eviction";
-        MachineID writeback_requestor, desc="";
+        bool put_waiting_for_mem_ack, default="false", desc="Put is blocked by a dirty LLC victim writeback";
     }
 
     // Cache entry
@@ -267,24 +265,27 @@ machine(MachineType:L2Cache, "LLC") :
                     DPRINTF(FlexLLC, "GetM: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
                     trigger(Event:GetM, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.type == CoherenceRequestType:Put) {
-                    if (cacheMemory.cacheAvail(in_msg.addr)) {
-                        // if there exists vac, insert directly
-                        DPRINTF(FlexLLC, "Put: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
-                        trigger(Event:Put, in_msg.addr, cache_entry, tbe);
-                    } else {
-                        // insert after replacement
-                        Addr victim_addr := cacheMemory.cacheProbe(in_msg.addr);
-                        CacheEntry victim_entry := getCacheEntry(victim_addr);
-                        TBE victim_tbe := TBEs[victim_addr];
-                        assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
-                        if (!victim_entry.dirty) {
-                            // silent replacement
-                            DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
-                            trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
+                    Entry dir_entry := getDirectoryEntry(in_msg.addr);
+                    if (!dir_entry.put_waiting_for_mem_ack) {
+                        if (cacheMemory.cacheAvail(in_msg.addr)) {
+                            // if there exists vac, insert directly
+                            DPRINTF(FlexLLC, "Put: Address = %#x, Current State = %s, Requestor = %s \n", in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.requestor);
+                            trigger(Event:Put, in_msg.addr, cache_entry, tbe);
                         } else {
-                            // replacement with writeback
-                            DPRINTF(FlexLLC, "Replacement_Writeback: Address = %#x \n", victim_addr);
-                            trigger(Event:Replacement_Writeback, victim_addr, victim_entry, victim_tbe);
+                            // insert after replacement
+                            Addr victim_addr := cacheMemory.cacheProbe(in_msg.addr);
+                            CacheEntry victim_entry := getCacheEntry(victim_addr);
+                            TBE victim_tbe := TBEs[victim_addr];
+                            assert(is_valid(victim_entry) && (victim_addr != in_msg.addr));
+                            if (!victim_entry.dirty) {
+                                // silent replacement
+                                DPRINTF(FlexLLC, "Replacement_Silent: Address = %#x \n", victim_addr);
+                                trigger(Event:Replacement_Silent, victim_addr, victim_entry, victim_tbe);
+                            } else {
+                                // replacement with writeback
+                                DPRINTF(FlexLLC, "Replacement_Writeback: Address = %#x \n", victim_addr);
+                                trigger(Event:Replacement_Writeback, victim_addr, victim_entry, victim_tbe);
+                            }
                         }
                     }
                 } else if (in_msg.type == CoherenceRequestType:Upg) {
@@ -379,9 +380,6 @@ machine(MachineType:L2Cache, "LLC") :
             if (is_valid(tbe)) {
                 // Read from main memory
                 tbe.requestors.add(in_msg.requestor);
-            } else {
-                // WB into main memory
-                getDirectoryEntry(address).writeback_requestor := in_msg.requestor;
             }
             DPRINTF(FlexLLC, "addRequestorToMemReq: Address = %#x, Sender = %s \n", in_msg.addr, in_msg.requestor);
         }
@@ -391,11 +389,11 @@ machine(MachineType:L2Cache, "LLC") :
         assert(is_valid(cache_entry));
         Entry dir_entry := getDirectoryEntry(address);
         peek(requestInPort, RequestMsg) {
-            dir_entry.putReqID := in_msg.reqID;
             dir_entry.memWriteIssueTime := curCycle();
             dir_entry.from_addr := in_msg.addr;
             Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
-            from_dir_entry.writeback_triggered := true;
+            assert(!from_dir_entry.put_waiting_for_mem_ack);
+            from_dir_entry.put_waiting_for_mem_ack := true;
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
                 out_msg.addr := address;
                 out_msg.Type := MemoryRequestType:MEMORY_WB;
@@ -410,37 +408,26 @@ machine(MachineType:L2Cache, "LLC") :
         DPRINTF(FlexLLC, "sendMemWrite: Address = %#x, Sender = %s \n", address, machineID);
     }
 
-    action(sendAck, desc="Send Put acknowledgement") {
+    action(releasePendingPut, desc="Allow the Put blocked by this writeback to execute") {
         Entry dir_entry := getDirectoryEntry(address);
-        if (!dir_entry.writeback_triggered) {
-            peek(requestInPort, RequestMsg) {
-                enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                    out_msg.reqID := in_msg.reqID;
-                    out_msg.addr := address;
-                    out_msg.type := CoherenceResponseType:Ack;
-                    out_msg.sender := machineID;
-                    out_msg.Destination.clear();
-                    out_msg.Destination.add(in_msg.requestor);
-                    out_msg.MessageSize := MessageSizeType:Writeback_Control;
-                }
-                DPRINTF(FlexLLC, "sendAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
-            }
-        }
-        dir_entry.writeback_triggered := false;
+        Entry from_dir_entry := getDirectoryEntry(dir_entry.from_addr);
+        assert(from_dir_entry.put_waiting_for_mem_ack);
+        from_dir_entry.put_waiting_for_mem_ack := false;
     }
 
-    action(forwardAck, desc="Forward Put acknowledgement") {
-        Entry dir_entry := getDirectoryEntry(address);
-        enqueue(responseOutPort, ResponseMsg, 1) {
-            out_msg.reqID := dir_entry.putReqID;
-            out_msg.addr := dir_entry.from_addr;
-            out_msg.type := CoherenceResponseType:Ack;
-            out_msg.sender := machineID;
-            out_msg.Destination.clear();
-            out_msg.Destination.add(getDirectoryEntry(address).writeback_requestor);
-            out_msg.MessageSize := MessageSizeType:Writeback_Control;
+    action(sendAck, desc="Send Put acknowledgement") {
+        peek(requestInPort, RequestMsg) {
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := in_msg.reqID;
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:Ack;
+                out_msg.sender := machineID;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(in_msg.requestor);
+                out_msg.MessageSize := MessageSizeType:Writeback_Control;
+            }
+            DPRINTF(FlexLLC, "sendAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
         }
-        DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", dir_entry.from_addr, getDirectoryEntry(dir_entry.from_addr).state, machineID, dir_entry.writeback_requestor);
     }
 
     action(sendDataToL1, desc="") {
@@ -540,7 +527,7 @@ machine(MachineType:L2Cache, "LLC") :
     transition({L2I, L2I_L1Owned, L2V, L2IL1Owned_D, L2I_D, L2V_D}, Mem_Ack) {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
-        forwardAck;
+        releasePendingPut;
         popMemResponseQueue;
         wakeUpAllQueues;
     }
