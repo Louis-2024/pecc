@@ -222,6 +222,10 @@ def create_system(
         # out ports
         l2_cntrl.responseOut = MessageBuffer(ordered=False)
         l2_cntrl.responseOut.out_port = ruby_system.network.in_port
+        # Internal completion operation for Puts buffered during LLC eviction.
+        l2_cntrl.triggerQueue = MessageBuffer(
+            randomization='disabled', allow_zero_latency=True
+        )
         # memory connection
         l2_cntrl.requestToDir = MessageBuffer()
         l2_cntrl.requestToDir.out_port = ruby_system.network.in_port

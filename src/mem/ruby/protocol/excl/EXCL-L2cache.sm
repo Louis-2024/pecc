@@ -20,6 +20,7 @@ machine(MachineType:L2Cache, "LLC") :
     // Interface to the directory
     MessageBuffer *requestToDir, network="To", virtual_network="3", vnet_type="request";
     MessageBuffer *responseFromDir, network="From", virtual_network="4", vnet_type="response";
+    MessageBuffer *triggerQueue;
 
     // Maximum outstanding memory pending requests
     int maxOutstandingMemRequests := 1;
@@ -39,6 +40,7 @@ machine(MachineType:L2Cache, "LLC") :
         V_Clean, AccessPermission:Read_Write, desc="Cache line clean in LLC";
         V_Dirty, AccessPermission:Read_Write, desc="Cache line dirty in LLC";
         I, AccessPermission:Maybe_Stale, desc="Cache line is in caching hierarchy but not in LLC";
+        PutPending, AccessPermission:Busy, desc="Put buffered while an LLC victim is evicted";
         
         // transient states
         MemReadPending, AccessPermission:Busy, desc="Memory read is pending";
@@ -54,6 +56,8 @@ machine(MachineType:L2Cache, "LLC") :
         Get, desc="...";
         Put_Clean, desc="...";
         Put_Dirty, desc="...";
+        CompletePut_Clean, desc="Install and acknowledge a buffered clean Put";
+        CompletePut_Dirty, desc="Install and acknowledge a buffered dirty Put";
         DontCare_Request, desc="...";
 
         // Events triggered by receiving L1 responses
@@ -75,7 +79,6 @@ machine(MachineType:L2Cache, "LLC") :
         MachineID requestor, desc="Requestor";
         Cycles reqID, desc="Request ID";
         Addr from_addr, desc="Address of request that triggers replacement";
-        bool writeback_triggered, desc="Indicator of chained eviction";
         Cycles memReadIssueTime, desc="Performance metric monitor field";
         Cycles memWriteIssueTime, desc="Performance metric monitor field";
 
@@ -88,10 +91,12 @@ machine(MachineType:L2Cache, "LLC") :
         bool dirty,             desc="Dirty bit";
     }
 
-    // TBE
-    // TBE is not really used here
     structure(TBE, desc="Transaction buffer entry") {
-        bool dummy_field;
+        DataBlock putData, desc="Buffered Put data";
+        bool putDirty, desc="Buffered Put dirty bit";
+        bool modifiedInCurrentFetch, desc="Buffered profiling metadata";
+        Cycles putReqID, desc="Buffered Put request ID";
+        MachineID putRequestor, desc="Buffered Put requestor";
     }
 
     structure(TBETable, external="yes") {
@@ -223,6 +228,22 @@ machine(MachineType:L2Cache, "LLC") :
 
     out_port(responseOutPort, ResponseMsg, responseOut);
     out_port(requestToDirOutPort, DirectoryMsg, requestToDir);
+    out_port(triggerOutPort, TriggerMsg, triggerQueue);
+
+    in_port(triggerInPort, TriggerMsg, triggerQueue) {
+        if (triggerInPort.isReady(clockEdge())) {
+            peek(triggerInPort, TriggerMsg) {
+                CacheEntry cache_entry := getCacheEntry(in_msg.addr);
+                TBE tbe := TBEs[in_msg.addr];
+                assert(is_valid(tbe));
+                if (tbe.putDirty) {
+                    trigger(Event:CompletePut_Dirty, in_msg.addr, cache_entry, tbe);
+                } else {
+                    trigger(Event:CompletePut_Clean, in_msg.addr, cache_entry, tbe);
+                }
+            }
+        }
+    }
 
     in_port(responseFromDirInPort, DirectoryMsg, responseFromDir) {
         if (responseFromDirInPort.isReady(clockEdge())) {
@@ -299,6 +320,11 @@ machine(MachineType:L2Cache, "LLC") :
         unset_cache_entry();
     }
 
+    action(reserveVictim, desc="Keep the victim slot reserved until memory acknowledges its writeback") {
+        assert(is_valid(cache_entry));
+        cacheMemory.setMRU(cache_entry);
+    }
+
     action(writeDataToCache, desc="Write data to cache") {
         peek(requestInPort, RequestMsg) {
             assert(is_valid(cache_entry));
@@ -309,6 +335,61 @@ machine(MachineType:L2Cache, "LLC") :
         }
         profiler.profileWritebackFromL1ToL2();
         profiler.profileL2Writes();
+    }
+
+    action(bufferPut, desc="Buffer a Put so its network request can be removed") {
+        peek(requestInPort, RequestMsg) {
+            check_allocate(TBEs);
+            assert(!TBEs.isPresent(in_msg.addr));
+            TBEs.allocate(in_msg.addr);
+            TBE put_tbe := TBEs[in_msg.addr];
+            put_tbe.putData := in_msg.dataBlk;
+            put_tbe.putDirty := in_msg.dirty;
+            put_tbe.modifiedInCurrentFetch := in_msg.modifiedInCurrentFetch;
+            put_tbe.putReqID := in_msg.reqID;
+            put_tbe.putRequestor := in_msg.requestor;
+            getDirectoryEntry(in_msg.addr).state := State:PutPending;
+            getDirectoryEntry(address).from_addr := in_msg.addr;
+        }
+    }
+
+    action(scheduleBufferedPut, desc="Schedule buffered Put installation") {
+        enqueue(triggerOutPort, TriggerMsg, 0) {
+            out_msg.addr := getDirectoryEntry(address).from_addr;
+        }
+    }
+
+    action(scheduleBufferedPutAfterWriteback, desc="Schedule Put after victim writeback acknowledgement") {
+        Entry victim_dir_entry := getDirectoryEntry(address);
+        assert(TBEs.isPresent(victim_dir_entry.from_addr));
+        enqueue(triggerOutPort, TriggerMsg, 0) {
+            out_msg.addr := victim_dir_entry.from_addr;
+        }
+    }
+
+    action(writeBufferedPutToCache, desc="Install buffered Put data in the LLC") {
+        assert(is_valid(cache_entry));
+        assert(is_valid(tbe));
+        cache_entry.dataBlk := tbe.putData;
+        cache_entry.dirty := tbe.putDirty;
+        cacheMemory.setMRU(cache_entry);
+        profiler.profileWritebackFromL1ToL2();
+        profiler.profileL2Writes();
+    }
+
+    action(profileBufferedRepetitiveL2Writes, desc="Profile a buffered Put") {
+        if (!tbe.modifiedInCurrentFetch) {
+            Entry dir_entry := getDirectoryEntry(address);
+            if (dir_entry.L2ToL1) {
+                profiler.profileRepetitiveL2Writes();
+            }
+        }
+    }
+
+    action(deallocateTBE, desc="Release a buffered Put") {
+        assert(is_valid(tbe));
+        TBEs.deallocate(address);
+        unset_tbe();
     }
 
     // actions on out_port
@@ -337,10 +418,6 @@ machine(MachineType:L2Cache, "LLC") :
             Entry dir_entry := getDirectoryEntry(address);
             dir_entry.memWriteIssueTime := curCycle();
             dir_entry.from_addr := in_msg.addr;
-            dir_entry.reqID := in_msg.reqID;
-            dir_entry.requestor := in_msg.requestor;
-            Entry from_dir_entry := getDirectoryEntry(in_msg.addr);
-            from_dir_entry.writeback_triggered := true;
 
             enqueue(requestToDirOutPort, DirectoryMsg, cache_access_latency) {
                 out_msg.addr := address;
@@ -356,32 +433,28 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     action(checkAndSendAck, desc="Send Put acknowledgement") {
-        Entry dir_entry := getDirectoryEntry(address);
-        if (!dir_entry.writeback_triggered) {
-            peek(requestInPort, RequestMsg) {
-                enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                    out_msg.reqID := in_msg.reqID;
-                    out_msg.addr := address;
-                    out_msg.type := CoherenceResponseType:Ack;
-                    out_msg.sender := machineID;
-                    out_msg.Destination.clear();
-                    out_msg.Destination.add(in_msg.requestor);
-                    out_msg.MessageSize := MessageSizeType:Writeback_Control;
-                }
+        peek(requestInPort, RequestMsg) {
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := in_msg.reqID;
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:Ack;
+                out_msg.sender := machineID;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(in_msg.requestor);
+                out_msg.MessageSize := MessageSizeType:Writeback_Control;
             }
         }
-        dir_entry.writeback_triggered := false;  // reset
     }
 
-    action(forwardAck, desc="Send Put acknowledgement") {
-        Entry dir_entry := getDirectoryEntry(address);
-        enqueue(responseOutPort, ResponseMsg, 1) {
-            out_msg.reqID := dir_entry.reqID;
-            out_msg.addr := dir_entry.from_addr;
+    action(sendBufferedPutAck, desc="Acknowledge a Put after its LLC installation") {
+        assert(is_valid(tbe));
+        enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+            out_msg.reqID := tbe.putReqID;
+            out_msg.addr := address;
             out_msg.type := CoherenceResponseType:Ack;
             out_msg.sender := machineID;
             out_msg.Destination.clear();
-            out_msg.Destination.add(dir_entry.requestor);
+            out_msg.Destination.add(tbe.putRequestor);
             out_msg.MessageSize := MessageSizeType:Writeback_Control;
         }
     }
@@ -433,6 +506,18 @@ machine(MachineType:L2Cache, "LLC") :
 
     action(popRequestQueue, desc="Pop the request queue") {
         requestInPort.dequeue(clockEdge());
+    }
+
+    action(popTriggerQueue, desc="Pop the internal trigger queue") {
+        triggerInPort.dequeue(clockEdge());
+    }
+
+    action(stallRequestQueue, desc="Allow unrelated requests to pass a pending Put") {
+        stall_and_wait(requestInPort, address);
+    }
+
+    action(wakeUpAllQueues, desc="Wake requests stalled on a completed Put") {
+        wakeUpAllBuffers();
     }
 
     // Other actions
@@ -523,32 +608,56 @@ machine(MachineType:L2Cache, "LLC") :
 
     transition(V_Clean, Replacement, InMem) {BankAccess} {
         unsetL2ToL1;
+        bufferPut;
         deallocateCacheBlock;
+        scheduleBufferedPut;
+        popRequestQueue;
     }
 
     transition(V_Dirty, Replacement, MemWritePending) {BankAccess, MemAccess} {
         unsetL2ToL1;
+        bufferPut;
         writeback;
-        deallocateCacheBlock;
-    }
-
-    transition(MemWritePending, Mem_Ack, InMem) {
-        decrementOutstandingMemRequest;
-        profileMemWriteLatency;
-        forwardAck;
-        popMemResponseQueue;
-    }
-
-    transition(MemWritePending, Get, MemReadPending) {MemAccess} {
-        sendMemRead;
+        reserveVictim;
         popRequestQueue;
     }
 
-    transition(MemReadPending, Mem_Ack) {
+    transition(MemWritePending, Mem_Ack, InMem) {BankAccess} {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
-        forwardAck;
+        deallocateCacheBlock;
+        scheduleBufferedPutAfterWriteback;
         popMemResponseQueue;
+        wakeUpAllQueues;
+    }
+
+    transition(MemWritePending, {Get, Replacement, Put_Clean, Put_Dirty,
+                                 DontCare_Request}) {
+        stallRequestQueue;
+    }
+
+    transition(PutPending, CompletePut_Clean, V_Clean) {BankAccess} {
+        profileBufferedRepetitiveL2Writes;
+        allocateCacheBlock;
+        writeBufferedPutToCache;
+        sendBufferedPutAck;
+        deallocateTBE;
+        popTriggerQueue;
+        wakeUpAllQueues;
+    }
+
+    transition(PutPending, CompletePut_Dirty, V_Dirty) {BankAccess} {
+        profileBufferedRepetitiveL2Writes;
+        allocateCacheBlock;
+        writeBufferedPutToCache;
+        sendBufferedPutAck;
+        deallocateTBE;
+        popTriggerQueue;
+        wakeUpAllQueues;
+    }
+
+    transition(PutPending, {Get, Put_Clean, Put_Dirty, DontCare_Request}) {
+        stallRequestQueue;
     }
 
 }
