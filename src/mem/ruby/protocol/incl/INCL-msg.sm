@@ -43,6 +43,7 @@ enumeration(CoherenceResponseType, desc="Types of response messages") {
     FromMemory, desc="Data comes from mem";
     Writeback, desc="Data eviction from L1 to LLC";
     Ack, desc="Writeback acknowledgement";
+    UpgradeAck, desc="Upgrade acknowledgement from the LLC";
 }
 
 // ResponseMsg

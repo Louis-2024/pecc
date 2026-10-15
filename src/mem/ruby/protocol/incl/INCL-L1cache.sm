@@ -65,6 +65,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
         M_A, AccessPermission:Read_Only, desc="Issued Upg but has not observed Upg on bus";
         ML_A, AccessPermission:Read_Only, desc="Same as M_A but original request is Lock instead of GetM";
+        M_UA, AccessPermission:Read_Only, desc="Observed own Upg but waiting for LLC acknowledgement";
+        ML_UA, AccessPermission:Read_Only, desc="Same as M_UA but original request is Lock";
         
         I_AD, AccessPermission:Busy, desc="Issued Put but has not observed Put on bus (Put has writeback)";
         I_D, AccessPermission:Busy, desc="Observed Put but waiting for writeback acknowledge";
@@ -109,6 +111,7 @@ machine(MachineType:L1Cache, "L1 Cache") :
         DataFromLLC, desc="Data comes from LLC";
         DataCacheToCache, desc="Data comes from direct cache-to-cache transfer";
         Ack, desc="Put acknowledge";
+        UpgradeAck, desc="LLC has accepted an Upgrade";
 
         // Internal trigger event
         Complete, desc="Completion event that finalizes state transition";
@@ -352,6 +355,11 @@ machine(MachineType:L1Cache, "L1 Cache") :
                 if (in_msg.type == CoherenceResponseType:Ack) {
                     DPRINTF(FlexLLC, "(%s) (Ack: Address = %#x, Current State = %s, Sender = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.sender);
                     trigger(Event:Ack, in_msg.addr, cache_entry, tbe);
+                } else if (in_msg.type == CoherenceResponseType:UpgradeAck) {
+                    DPRINTF(FlexLLC, "(%s) (UpgradeAck: Address = %#x, Current State = %s, Sender = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.sender);
+                    assert(is_valid(tbe));
+                    assert(in_msg.reqID == tbe.reqID);
+                    trigger(Event:UpgradeAck, in_msg.addr, cache_entry, tbe);
                 } else if (in_msg.type == CoherenceResponseType:FromLLC) {
                     DPRINTF(FlexLLC, "(%s) (DataFromLLC: Address = %#x, Current State = %s, Sender = %s) \n", machineID, in_msg.addr, getState(tbe, cache_entry, in_msg.addr), in_msg.sender);
                     trigger(Event:DataFromLLC, in_msg.addr, cache_entry, tbe);
@@ -998,6 +1006,30 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
+    // An Upgrade is ordered once observed on the request bus, but local write
+    // permission is withheld until the LLC acknowledgement arrives. Preserve
+    // later snoops in the TBE so completion still follows request-bus order.
+    transition({M_UA, ML_UA}, OtherGetM) {
+        checkAndAddRequestor;
+        setToI;
+        popRequestQueue;
+    }
+
+    transition({M_UA, ML_UA}, OtherGetS) {
+        setShared;
+        checkAndAddRequestor;
+        popRequestQueue;
+    }
+
+    transition({M_UA, ML_UA}, OtherUpg) {
+        setToI;
+        popRequestQueue;
+    }
+
+    transition({M_UA, ML_UA}, OtherPut) {
+        popRequestQueue;
+    }
+
     // Transition on acquiring bus
 
     transition(I, BusGrantDoPut, CMP) {
@@ -1065,18 +1097,13 @@ machine(MachineType:L1Cache, "L1 Cache") :
         popRequestQueue;
     }
 
-    transition(M_A, OwnUpg, CMP) {
-        setOwned;
+    transition(M_A, OwnUpg, M_UA) {
         unsetShared;
-        upgStoreHit;
         popRequestQueue;
-        triggerLocalReqCompletion;
     }
 
-    transition(ML_A, OwnUpg, L) {
-        setOwned;
+    transition(ML_A, OwnUpg, ML_UA) {
         unsetShared;
-        upgStoreHit;
         popRequestQueue;
     }
 
@@ -1090,6 +1117,19 @@ machine(MachineType:L1Cache, "L1 Cache") :
     transition(I_D, Ack, CMP) {
         popResponseQueue;
         triggerLocalReqCompletion;
+    }
+
+    transition(M_UA, UpgradeAck, CMP) {
+        setOwned;
+        upgStoreHit;
+        popResponseQueue;
+        triggerLocalReqCompletion;
+    }
+
+    transition(ML_UA, UpgradeAck, L) {
+        setOwned;
+        upgStoreHit;
+        popResponseQueue;
     }
 
     transition(S_D, {DataFromLLC, DataCacheToCache}, CMP) {
@@ -1134,7 +1174,8 @@ machine(MachineType:L1Cache, "L1 Cache") :
 
     // Transition on finalizing transaction
 
-    transition({CMP, S, M, M_A, ML_A}, {DataFromLLC, DataFromMem, DataCacheToCache}) {
+    transition({CMP, S, M, M_A, ML_A, M_UA, ML_UA},
+               {DataFromLLC, DataFromMem, DataCacheToCache}) {
         popResponseQueue;
     }
     transition(CMP, Complete, *) {

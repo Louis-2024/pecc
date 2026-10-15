@@ -481,6 +481,22 @@ machine(MachineType:L2Cache, "LLC") :
         }
     }
 
+    action(sendUpgradeAck, desc="Acknowledge an Upgrade after the LLC accepts it") {
+        peek(requestInPort, RequestMsg) {
+            assert(in_msg.type == CoherenceRequestType:Upg);
+            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                out_msg.reqID := in_msg.reqID;
+                out_msg.addr := address;
+                out_msg.type := CoherenceResponseType:UpgradeAck;
+                out_msg.sender := machineID;
+                out_msg.Destination.clear();
+                out_msg.Destination.add(in_msg.requestor);
+                out_msg.MessageSize := MessageSizeType:Response_Control;
+            }
+            DPRINTF(FlexLLC, "sendUpgradeAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
+        }
+    }
+
     action(sendBufferedPutAck, desc="Acknowledge a Put after its LLC installation") {
         assert(is_valid(tbe));
         enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
@@ -647,6 +663,7 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     transition(L2I, Upgrade, L2I_L1Owned) {
+        sendUpgradeAck;
         popRequestQueue;
     }
 
@@ -676,6 +693,7 @@ machine(MachineType:L2Cache, "LLC") :
     transition(L2V, Upgrade, L2I_L1Owned) {BankAccess} {
         setDirty;
         deallocateCacheBlock;
+        sendUpgradeAck;
         popRequestQueue;
     }
 
@@ -702,7 +720,12 @@ machine(MachineType:L2Cache, "LLC") :
 
     // transitions from L2I_L1Owned
 
-    transition(L2I_L1Owned, {GetS, GetS_NI, GetM, Upgrade}) {
+    transition(L2I_L1Owned, {GetS, GetS_NI, GetM}) {
+        popRequestQueue;
+    }
+
+    transition(L2I_L1Owned, Upgrade) {
+        sendUpgradeAck;
         popRequestQueue;
     }
 
@@ -755,10 +778,12 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     transition(L2I_D, Upgrade, L2IL1Owned_D) {
+        sendUpgradeAck;
         popRequestQueue;
     }
 
     transition(L2IL1Owned_D, Upgrade) {
+        sendUpgradeAck;
         popRequestQueue;
     }
 
@@ -789,6 +814,7 @@ machine(MachineType:L2Cache, "LLC") :
     transition(L2V_D, Upgrade, L2IL1Owned_D) {BankAccess} {
         setDirty;
         deallocateCacheBlock;
+        sendUpgradeAck;
         popRequestQueue;
     }
 }
