@@ -445,17 +445,20 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     action(sendAck, desc="Send Put acknowledgement") {
-        peek(requestInPort, RequestMsg) {
-            enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
-                out_msg.reqID := in_msg.reqID;
-                out_msg.addr := address;
-                out_msg.type := CoherenceResponseType:Ack;
-                out_msg.sender := machineID;
-                out_msg.Destination.clear();
-                out_msg.Destination.add(in_msg.requestor);
-                out_msg.MessageSize := MessageSizeType:Writeback_Control;
+        Entry dir_entry := getDirectoryEntry(address);
+        if (!dir_entry.writeback_triggered) {
+            peek(requestInPort, RequestMsg) {
+                enqueue(responseOutPort, ResponseMsg, cache_access_latency) {
+                    out_msg.reqID := in_msg.reqID;
+                    out_msg.addr := address;
+                    out_msg.type := CoherenceResponseType:Ack;
+                    out_msg.sender := machineID;
+                    out_msg.Destination.clear();
+                    out_msg.Destination.add(in_msg.requestor);
+                    out_msg.MessageSize := MessageSizeType:Writeback_Control;
+                }
+                DPRINTF(FlexLLC, "sendAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
             }
-            DPRINTF(FlexLLC, "sendAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", address, getDirectoryEntry(address).state, machineID, in_msg.requestor);
         }
     }
 
@@ -472,6 +475,7 @@ machine(MachineType:L2Cache, "LLC") :
                 out_msg.Destination.add(dir_entry.writeback_requestor);
                 out_msg.MessageSize := MessageSizeType:Writeback_Control;
             }
+            from_dir_entry.writeback_triggered := false;
             DPRINTF(FlexLLC, "forwardAck: Address = %#x, Current State = %s, Sender = %s, Destination = %s \n", dir_entry.from_addr, getDirectoryEntry(dir_entry.from_addr).state, machineID, dir_entry.writeback_requestor);
         }
     }
@@ -573,7 +577,7 @@ machine(MachineType:L2Cache, "LLC") :
     transition({L2I_L1NotOwned, L2I_L1Owned, L2V_L1NotOwned, L2V_L1Owned, L2I_L1NotOwned_D, L2I_L1Owned_D, L2V_L1NotOwned_D, L2V_L1Owned_D}, Mem_Ack) {
         decrementOutstandingMemRequest;
         profileMemWriteLatency;
-        // forwardAck;
+        forwardAck;
         popMemResponseQueue;
         wakeUpAllQueues;
     }
@@ -660,6 +664,11 @@ machine(MachineType:L2Cache, "LLC") :
         allocateCacheBlock;
         setDirty;
         writeDataToCache;
+        sendAck;
+        popRequestQueue;
+    }
+
+    transition(L2V_L1NotOwned, Put) { // race condition hack fix
         sendAck;
         popRequestQueue;
     }
