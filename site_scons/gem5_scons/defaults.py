@@ -44,7 +44,7 @@ from gem5_python_paths import extra_python_paths
 
 def EnvDefaults(env):
     # export TERM so that clang reports errors in color
-    use_vars = set([ 'AS', 'AR', 'CC', 'CXX', 'HOME', 'LD_LIBRARY_PATH',
+    use_vars = set([ 'AS', 'AR', 'CC', 'CXX', 'CPATH', 'HOME', 'LD_LIBRARY_PATH',
                      'LIBRARY_PATH', 'PATH', 'PKG_CONFIG_PATH', 'PROTOC',
                      'PYTHONPATH', 'RANLIB', 'TERM', 'PYTHON_CONFIG',
                      'CCFLAGS_EXTRA', 'GEM5PY_CCFLAGS_EXTRA',

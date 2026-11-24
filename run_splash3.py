@@ -8,14 +8,14 @@ from multiprocessing.pool import Pool
 
 
 def generate_splash3_command(program, protocol, ncore, llc_size, l1d_size="16kB",  l1i_size="16kB", l1_assoc=8, llc_assoc=16, mem_size="1GB"):
-    gem5_home = "/gem5/pecc"
-    splash3_dir = "/gem5/pecc/splash-3-static-link/codes"
+    gem5_home = "/home/l25xiao/PINE/pecc"
+    splash3_dir = "/home/l25xiao/PINE/pecc/splash-3-static-link/codes"
     config = f"{program}_{protocol}_{ncore}_{l1d_size}_{llc_size}"
     binary = ""
     stdin = ""
     options = ""
     wkdir = ""
-    outdir = f"/gem5/pecc/splash-3-out/{config}"
+    outdir = f"/home/l25xiao/PINE/pecc/splash-3-out/{config}"
 
     if program == 'cholesky':
         binary=f"{splash3_dir}/kernels/cholesky/CHOLESKY"
@@ -129,22 +129,10 @@ if __name__ == '__main__':
     core_count= 4
     cmds = []
     for program in programs:
-        for protocol in ['INCL','EXCL']:
+        for protocol in ['INCL']:
             l1_size = '16kB'
             llc_size = '2048kB'
             cmds.append(generate_splash3_command(program, protocol, core_count, llc_size,l1i_size=l1_size, l1d_size=l1_size, mem_size=mem_size))
-            # l1_size = '8kB'
-            # llc_size = '2048kB'
-            # cmds.append(generate_splash3_command(program, protocol, core_count, llc_size,l1i_size=l1_size, l1d_size=l1_size, mem_size=mem_size))
-            # l1_size = '32kB'
-            # llc_size = '2048kB'
-            # cmds.append(generate_splash3_command(program, protocol, core_count, llc_size,l1i_size=l1_size, l1d_size=l1_size, mem_size=mem_size))
-            # l1_size = '16kB'
-            # llc_size = '1024kB'
-            # cmds.append(generate_splash3_command(program, protocol, core_count, llc_size,l1i_size=l1_size, l1d_size=l1_size, mem_size=mem_size))
-            # l1_size = '16kB'
-            # llc_size = '4096kB'
-            # cmds.append(generate_splash3_command(program, protocol, core_count, llc_size,l1i_size=l1_size, l1d_size=l1_size, mem_size=mem_size))
 
     pool = Pool(31)  # Modify here to configure the number of cores to run the simulation
     results = list(tqdm.tqdm(pool.imap_unordered(call_proc, cmds), total=len(cmds)))
