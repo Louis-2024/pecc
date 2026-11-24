@@ -38,3 +38,5 @@ Source('StoreTrace.cc')
 
 SimObject('CustomProfiler.py', sim_objects=['CustomProfiler'])
 Source('CustomProfiler.cc')
+SimObject('WiredOR.py', sim_objects=['WiredOR'])
+Source('WiredOR.cc')

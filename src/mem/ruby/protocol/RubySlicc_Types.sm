@@ -279,3 +279,9 @@ structure(CustomProfiler, external="yes") {
     void profileL2Writes();
     void profileRepetitiveL2Writes();
 }
+
+structure(WiredOR, external="yes") {
+    void addL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+    bool isL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+    void removeL1OwnedRequest(NodeID bank, Cycles reqID, NodeID requester);
+}

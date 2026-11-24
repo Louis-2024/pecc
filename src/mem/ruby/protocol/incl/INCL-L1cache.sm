@@ -38,6 +38,9 @@ machine(MachineType:L1Cache, "L1 Cache") :
     // Profiler
     CustomProfiler *profiler;
 
+    // WiredOR
+    WiredOR *wiredOR;
+
 {
     ////////////////////////////////////////////////////////////////////////////
     // STATES
@@ -726,6 +729,15 @@ machine(MachineType:L1Cache, "L1 Cache") :
         }
     }
 
+    action(setWiredORLine, desc="") {
+        assert(is_valid(cache_entry));
+        peek(requestInPort, RequestMsg) {
+            NodeID bank := machineIDToNodeID(mapAddressToRange(address, MachineType:L2Cache, l2_select_low_bit, l2_select_num_bits, intToID(0)));
+            wiredOR.addL1OwnedRequest(bank, in_msg.reqID, machineIDToNodeID(in_msg.requestor));
+            DPRINTF(FlexLLC, "(%s) (setWiredORLine: Address = %#x, Bank = %d, reqID = %d, Requestor = %s) \n", machineID, address, bank, in_msg.reqID, in_msg.requestor);
+        }
+    }
+
     action(setOwned, desc="") {
         assert(is_valid(cache_entry));
         cache_entry.owned := true;
@@ -928,23 +940,27 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition(M, OtherGetS, O) {
+        setWiredORLine;
         setShared;
         sendDataResponse;
         popRequestQueue;
     }
 
     transition(M, OtherGetM, I) {
+        setWiredORLine;
         sendDataResponse;
         invalidateCacheEntry;
         popRequestQueue;
     }
 
     transition(O, OtherGetS) {
+        setWiredORLine;
         sendDataResponse;
         popRequestQueue;
     }
 
     transition(O, OtherGetM, I) {
+        setWiredORLine;
         sendDataResponse;
         invalidateCacheEntry;
         popRequestQueue;
@@ -983,12 +999,14 @@ machine(MachineType:L1Cache, "L1 Cache") :
     }
 
     transition({M_D, ML_D, L}, OtherGetM) {
+        setWiredORLine;
         checkAndAddRequestor;
         setToI;
         popRequestQueue;
     }
 
     transition({M_D, ML_D, L}, OtherGetS) {
+        setWiredORLine;
         setShared;
         checkAndAddRequestor;
         popRequestQueue;

@@ -27,6 +27,9 @@ machine(MachineType:L2Cache, "LLC") :
     // Profiler
     CustomProfiler *profiler;
 
+    // WiredOR
+    WiredOR *wiredOR;
+
 {
 
     ////////////////////////////////////////////////////////////////////////////
@@ -54,7 +57,7 @@ machine(MachineType:L2Cache, "LLC") :
         Get, desc="...";
         Put_Clean, desc="...";
         Put_Dirty, desc="...";
-        DontCare_Request, desc="...";
+        Dont_Care, desc="...";
 
         // Events triggered by receiving L1 responses
         Replacement, desc="...";
@@ -198,6 +201,11 @@ machine(MachineType:L2Cache, "LLC") :
         }
     }
 
+    bool isL1OwnedRequest(Cycles reqID, NodeID requester) {
+        NodeID bank := machineIDToNodeID(machineID);
+        return wiredOR.isL1OwnedRequest(bank, reqID, requester);
+    }
+
     bool _checkResourceAvailable(RequestType request_type, Addr addr) {
         if (request_type == RequestType:BankAccess) {
             return cacheMemory.checkResourceAvailable(CacheResourceType:DataArray, addr);
@@ -258,7 +266,11 @@ machine(MachineType:L2Cache, "LLC") :
                 TBE tbe := TBEs[in_msg.addr];
 
                 if (in_msg.type == CoherenceRequestType:GetS || in_msg.type == CoherenceRequestType:GetM) {
-                    trigger(Event:Get, in_msg.addr, cache_entry, tbe);
+                    if (isL1OwnedRequest(in_msg.reqID, machineIDToNodeID(in_msg.requestor))) {
+                        trigger(Event:Dont_Care, in_msg.addr, cache_entry, tbe);
+                    } else {
+                        trigger(Event:Get, in_msg.addr, cache_entry, tbe);
+                    }
                 } else if (in_msg.type == CoherenceRequestType:Put && in_msg.writeback) {
                     assert(is_invalid(cache_entry));
                     if (cacheMemory.cacheAvail(in_msg.addr)) {
@@ -275,7 +287,7 @@ machine(MachineType:L2Cache, "LLC") :
                         trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
                     }
                 } else {
-                    trigger(Event:DontCare_Request, in_msg.addr, cache_entry, tbe);
+                    trigger(Event:Dont_Care, in_msg.addr, cache_entry, tbe);
                 }
             }
         }
@@ -432,6 +444,9 @@ machine(MachineType:L2Cache, "LLC") :
     }
 
     action(popRequestQueue, desc="Pop the request queue") {
+        peek(requestInPort, RequestMsg) {
+            wiredOR.removeL1OwnedRequest(machineIDToNodeID(machineID), in_msg.reqID, machineIDToNodeID(in_msg.requestor));
+        }
         requestInPort.dequeue(clockEdge());
     }
 
@@ -483,7 +498,7 @@ machine(MachineType:L2Cache, "LLC") :
         popRequestQueue;
     }
 
-    transition(MemReadPending, Get) {
+    transition(MemReadPending, Get) {BankAccess} {
         popRequestQueue;
     }
 
@@ -494,7 +509,11 @@ machine(MachineType:L2Cache, "LLC") :
         popMemResponseQueue;
     }
 
-    transition(I, {Get, DontCare_Request}) {
+    transition(I, Get) {BankAccess} {
+        popRequestQueue;
+    }
+
+    transition({I, V_Clean, V_Dirty, MemReadPending, MemWritePending}, Dont_Care) {BankAccess} {
         popRequestQueue;
     }
 
@@ -539,7 +558,7 @@ machine(MachineType:L2Cache, "LLC") :
         popMemResponseQueue;
     }
 
-    transition(MemWritePending, Get, MemReadPending) {MemAccess} {
+    transition(MemWritePending, Get, MemReadPending) {BankAccess, MemAccess} {
         sendMemRead;
         popRequestQueue;
     }

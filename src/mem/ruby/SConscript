@@ -131,3 +131,4 @@ MakeInclude('system/HTMSequencer.hh')
 MakeInclude('system/VIPERCoalescer.hh')
 
 MakeInclude('profiler/CustomProfiler.hh')
+MakeInclude('profiler/WiredOR.hh')
